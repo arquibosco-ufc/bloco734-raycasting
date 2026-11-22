@@ -5,7 +5,6 @@ from matplotlib.widgets import Button, TextBox
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import time
 
-# Correção de compatibilidade Matplotlib + Python 3.14 para TextBox em ResizeEvent
 if not hasattr(ResizeEvent, 'inaxes'):
     ResizeEvent.inaxes = None
 
@@ -44,7 +43,6 @@ def mat_rotacao_z(ang_rad):
     ], dtype=np.float64)
 
 def mat_rotacao_eixo_arbitrario_quaternion(eixo, ang_rad, ponto_pivo=(0, 0, 0)):
-    """Rotação em torno de um eixo arbitrário usando Quatérnios."""
     u = np.array(eixo, dtype=np.float64)
     u /= np.linalg.norm(u)
     half = ang_rad / 2.0
@@ -62,13 +60,11 @@ def mat_rotacao_eixo_arbitrario_quaternion(eixo, ang_rad, ponto_pivo=(0, 0, 0)):
     return mat_translacao(px, py, pz) @ R @ mat_translacao(-px, -py, -pz)
 
 def mat_cisalhamento_xy(sh_xy):
-    """Cisalhamento (x' = x + sh_xy * y)."""
     M = np.eye(4, dtype=np.float64)
     M[0, 1] = sh_xy
     return M
 
 def mat_espelho_plano_arbitrario(ponto_plano, normal_plano):
-    """Espelhamento em relação a um plano arbitrário (Reflexão de Householder)."""
     p0 = np.array(ponto_plano, dtype=np.float64)
     n = np.array(normal_plano, dtype=np.float64)
     n /= np.linalg.norm(n)
@@ -78,7 +74,6 @@ def mat_espelho_plano_arbitrario(ponto_plano, normal_plano):
     return mat_translacao(*p0) @ R_esp @ mat_translacao(*(-p0))
 
 def construir_Mwc(eye, at, up):
-    """Constrói a matriz de transformação Mundo -> Câmera (M_wc)."""
     eye = np.array(eye, dtype=np.float64)
     at = np.array(at, dtype=np.float64)
     up = np.array(up, dtype=np.float64)
@@ -98,7 +93,6 @@ def construir_Mwc(eye, at, up):
     return R @ mat_translacao(-eye[0], -eye[1], -eye[2])
 
 def testar_aabb(O, D, bmin, bmax, t_limite=np.inf):
-    """Teste vetorizado de interseção Raio x Caixa Envoltória (AABB) para aceleração."""
     invD = 1.0 / np.where(np.abs(D) > 1e-8, D, 1e-8)
     t1 = (bmin - O) * invD
     t2 = (bmax - O) * invD
@@ -107,7 +101,7 @@ def testar_aabb(O, D, bmin, bmax, t_limite=np.inf):
     return (tmax >= np.maximum(tmin, 1e-4)) & (tmin < t_limite)
 
 # ==============================================================================
-# 2. MATERIAIS E TEXTURAS PROCEDURAIS
+# 2. MATERIAIS, TEXTURAS PROCEDURAIS E CÁUSTICA POR REFRAÇÃO (LEI DE SNELL)
 # ==============================================================================
 class Material:
     def __init__(self, nome, kd, ke, ka, brilho=32.0, refletividade=0.0, textura=None):
@@ -159,7 +153,106 @@ def avaliar_textura(tipo_tex, P_world, kd_base):
         cor_num = np.array([0.08, 0.16, 0.38])
         return np.where(letra[..., None], cor_num, cor_fundo)
 
+    elif tipo_tex == 'agua_fonte':
+        # Ondulações suaves na superfície da lâmina d'água do espelho d'água
+        w1 = np.sin(x * 3.8 + z * 2.7)
+        w2 = np.cos(x * 5.2 - z * 4.4)
+        w3 = np.sin((x - 27.0)**2 * 0.45 + (z - 19.8)**2 * 0.45)
+        onda = 0.5 + 0.22 * w1 + 0.18 * w2 + 0.10 * w3
+        cor_fundo = np.array([0.06, 0.28, 0.36])
+        cor_crista = np.array([0.32, 0.72, 0.85])
+        t = np.clip(onda, 0.0, 1.0)[..., None]
+        return (1.0 - t) * cor_fundo + t * cor_crista
+
     return np.broadcast_to(kd_base, P_world.shape).copy()
+
+
+def calcular_caustica_fonte(P_world, N_world, fonte_info, modo_noite):
+    """
+    Calcula a projeção de cáusticas geradas pelos spots submersos na parede interna
+    da fonte atravessando a lâmina d'água ondulada (Lei de Snell + convergência de frente de onda).
+    """
+    x_min, x_max = fonte_info['x_min'], fonte_info['x_max']
+    z_min, z_max = fonte_info['z_min'], fonte_info['z_max']
+    y_agua = fonte_info['y_agua']
+    spots = fonte_info['spots_submersos']
+
+    intensidade_global = 1.45 if modo_noite else 0.25
+    cor_caustica_base = np.array([0.62, 0.92, 1.00]) if modo_noite else np.array([0.75, 0.95, 1.00])
+
+    acum_caustica = np.zeros_like(P_world)
+    px, py, pz = P_world[..., 0], P_world[..., 1], P_world[..., 2]
+
+    for spot_pos, spot_dir in spots:
+        sx, sy, sz = spot_pos
+        # Vetor do spot submerso até o ponto P_world na fachada/cenário
+        vx = px - sx
+        vy = py - sy
+        vz = pz - sz
+        dist = np.sqrt(vx**2 + vy**2 + vz**2) + 1e-8
+        dx, dy, dz = vx / dist, vy / dist, vz / dist
+
+        # Só projeta para frente/cima em direção ao prédio e escultura
+        cos_cone = dx * spot_dir[0] + dy * spot_dir[1] + dz * spot_dir[2]
+        dentro_cone = (cos_cone > 0.35) & (dy > 0.02)
+
+        # Interseção do raio refratado com a superfície da água (y = y_agua)
+        t_agua = (y_agua - sy) / np.where(np.abs(dy) > 1e-6, dy, 1e-6)
+        wx = sx + t_agua * dx
+        wz = sz + t_agua * dz
+
+        na_lamina = (
+            dentro_cone &
+            (t_agua > 0.05) &
+            (t_agua < dist) &
+            (wx >= x_min) & (wx <= x_max) &
+            (wz >= z_min) & (wz <= z_max)
+        )
+
+        # Campo de ondas multi-frequência na superfície da água h(wx, wz)
+        k1x, k1z = 4.6, 3.9
+        k2x, k2z = -6.3, 5.1
+        k3x, k3z = 8.7, 7.4
+
+        fase1 = k1x * wx + k1z * wz
+        fase2 = k2x * wx + k2z * wz + 1.1
+        fase3 = k3x * wx + k3z * wz + 2.4
+
+        # Gradiente da onda (inclinação da normal da água -> refração de Snell)
+        dh_dx = 0.045 * k1x * np.cos(fase1) + 0.032 * k2x * np.cos(fase2) + 0.020 * k3x * np.cos(fase3)
+        dh_dz = 0.045 * k1z * np.cos(fase1) + 0.032 * k2z * np.cos(fase2) + 0.020 * k3z * np.cos(fase3)
+
+        # Laplaciano da superfície (d²h/dx² + d²h/dz²) mede convergência de raios refratados (cáustica!)
+        laplaciano = -(
+            0.045 * (k1x**2 + k1z**2) * np.sin(fase1) +
+            0.032 * (k2x**2 + k2z**2) * np.sin(fase2) +
+            0.020 * (k3x**2 + k3z**2) * np.sin(fase3)
+        )
+
+        # Filamentos luminosos nítidos onde os raios refratados convergem (cristas côncavas)
+        convergencia = np.maximum(0.0, laplaciano * 0.28 + 0.35 * np.sqrt(dh_dx**2 + dh_dz**2))
+        filamento = np.power(np.clip(convergencia, 0.0, 2.2), 2.3)
+
+        # Atenuação angular do spot e pela distância até a fachada
+        atenuacao_cone = np.power(np.maximum(0.0, (cos_cone - 0.35) / 0.65), 1.6)
+        atenuacao_dist = 1.0 / (1.0 + 0.012 * (dist**2))
+        ndl_fachada = np.maximum(0.0, -(N_world[..., 0]*dx + N_world[..., 1]*dy + N_world[..., 2]*dz))
+
+        contrib = na_lamina * filamento * atenuacao_cone * atenuacao_dist * (0.35 + 0.65 * ndl_fachada)
+        acum_caustica += contrib[..., None] * cor_caustica_base * intensidade_global
+
+    # Também ilumina o fundo interno da própria fonte com cáustica subaquática
+    no_fundo_fonte = (
+        (px >= x_min) & (px <= x_max) &
+        (pz >= z_min) & (pz <= z_max) &
+        (np.abs(py - y_agua) < 0.08)
+    )
+    if np.any(no_fundo_fonte):
+        sub_wave = np.sin(px * 6.5 + pz * 5.2) * np.cos(px * 5.8 - pz * 6.7)
+        c_sub = np.power(np.clip(0.55 + 0.65 * sub_wave, 0.0, 1.4), 2.6)
+        acum_caustica += no_fundo_fonte[..., None] * c_sub[..., None] * cor_caustica_base * (1.1 if modo_noite else 0.35)
+
+    return acum_caustica
 
 # ==============================================================================
 # 3. PRIMITIVAS GEOMÉTRICAS COM BOUNDING BOX (AABB)
@@ -236,7 +329,7 @@ def criar_malha_cobertura_metalica(M_inst):
 # 3B. MODELO PARAMÉTRICO: ESCULTURA CINÉTICA EM AÇO (5 LOSANGOS ROTACIONADOS A 45°)
 # ==============================================================================
 def gerar_parametros_escultura_cinetica(
-    origem_base=(16.5, 0.2, 21.0),
+    origem_base=(15.0, 0.2, 22.0),
     qtd_quadros=5,
     lado_base=2.35,
     espessura_perfil=0.14,
@@ -246,13 +339,6 @@ def gerar_parametros_escultura_cinetica(
     variacao_escala_passo=0.055,
     rotacao_conjunto_y_deg=-24.0
 ):
-    """
-    Constrói parametricamente a escultura cinética conforme a foto de referência:
-    - 5 quadros quadrangulares rotacionados a 45° (losangos verdadeiros, vértices em 0°, 90°, 180°, 270°)
-    - Escalonamento progressivo e deslocamento lateral que geram a perspectiva concêntrica
-    - Vértice inferior de cada losango apoiado diretamente sobre a base retangular de concreto
-    - Posicionada em área aberta (X=16.5m, Z=21.0m) bem afastada do Bloco 734.
-    """
     ox, oy, oz = origem_base
     M_conjunto = mat_translacao(ox, oy, oz) @ mat_rotacao_y(np.deg2rad(rotacao_conjunto_y_deg))
 
@@ -264,19 +350,15 @@ def gerar_parametros_escultura_cinetica(
     z_inicio = -((qtd_quadros - 1) * espacamento_z) / 2.0
 
     for k in range(qtd_quadros):
-        # Quadro k=0 (mais próximo) maior -> Quadro k=4 (mais ao fundo) gradualmente menor
         fator_centro = k - (qtd_quadros - 1) / 2.0
         L_k = lado_base * (1.0 - variacao_escala_passo * fator_centro)
-        # Semidiagonal do losango (distância do centro até cada vértice de 45°)
         r_k = L_k / np.sqrt(2.0)
 
-        # Ângulos 0°, 90°, 180°, 270° colocam os vértices nos eixos X e Y -> LOSANGO!
         thetas = np.deg2rad([0.0, 90.0, 180.0, 270.0])
         vx = r_k * np.cos(thetas)
         vy = r_k * np.sin(thetas)
 
         cx_k = fator_centro * deslocamento_x_passo
-        # Vértice inferior (theta=270°, vy = -r_k) toca exatamente o topo da base (base_alt)
         cy_k = base_alt + r_k + espessura_perfil * 0.35
         cz_k = z_inicio + k * espacamento_z
 
@@ -300,8 +382,7 @@ def gerar_parametros_escultura_cinetica(
             )
             barras_M.append(M_conjunto @ M_barra_loc)
 
-        # Sapata discreta de fixação no vértice inferior junto ao pedestal de concreto
-        p_inf = verts_loc[3]  # theta = 270° (vértice inferior do losango)
+        p_inf = verts_loc[3]
         M_sapata_loc = (
             mat_translacao(p_inf[0], base_alt + 0.04, p_inf[2]) @
             mat_escala(espessura_perfil * 1.4, 0.12, profundidade_perfil * 1.3)
@@ -338,15 +419,9 @@ def gerar_parametros_escultura_cinetica(
 # ==============================================================================
 def construir_geometria_bloco_ct():
     return {
-        'cx': 37.0,
-        'cz': 42.0,
-        'raio': 22.0,
-        'x_min': 15.0,
-        'x_max': 59.0,
-        'z_min': 20.0,
-        'z_max': 53.0,
-        'altura': 6.6,
-        'altura_platibanda': 5.0
+        'cx': 37.0, 'cz': 42.0, 'raio': 22.0,
+        'x_min': 15.0, 'x_max': 59.0, 'z_min': 20.0, 'z_max': 53.0,
+        'altura': 6.6, 'altura_platibanda': 5.0
     }
 
 def intersect_bloco_ct(O_cam, D_cam, prim):
@@ -448,7 +523,7 @@ def intersect_bloco_ct(O_cam, D_cam, prim):
     N_cam /= np.where(np.linalg.norm(N_cam, axis=-1, keepdims=True) > 1e-12,
                       np.linalg.norm(N_cam, axis=-1, keepdims=True), 1.0)
 
-    return t_best, N_cam, P_hit, sub_mat
+    return t_best, N_cam, P_hit, sub_mat, N_best
 
 # ==============================================================================
 # 5. INTERSEÇÃO GERAL DAS PRIMITIVAS COM FILTRO BOUNDING BOX
@@ -459,7 +534,7 @@ def intersect_primitiva(O_cam, D_cam, prim, t_atual_min=np.inf):
     if prim.aabb_cam is not None:
         if not np.any(testar_aabb(O_cam, D_cam, prim.aabb_cam[0], prim.aabb_cam[1], t_atual_min)):
             return (np.full(shape, np.inf), np.zeros_like(D_cam),
-                    np.zeros_like(D_cam), np.zeros(shape, dtype=int))
+                    np.zeros_like(D_cam), np.zeros(shape, dtype=int), np.zeros_like(D_cam))
 
     if prim.tipo == 'bloco_ct_arqueado':
         return intersect_bloco_ct(O_cam, D_cam, prim)
@@ -493,7 +568,7 @@ def intersect_primitiva(O_cam, D_cam, prim, t_atual_min=np.inf):
 
         M_inv = prim.M_inv
         P_w = np.einsum('ij,...j->...i', M_inv[:3, :3], O_cam + np.where(np.isfinite(t_best)[..., None], t_best[..., None], 0.0) * D_cam) + M_inv[:3, 3]
-        return t_best, N_best, P_w, np.zeros(shape, dtype=int)
+        return t_best, N_best, P_w, np.zeros(shape, dtype=int), N_best
 
     M_inv = prim.M_inv
     O_loc = np.einsum('ij,...j->...i', M_inv[:3, :3], O_cam) + M_inv[:3, 3]
@@ -580,18 +655,23 @@ def intersect_primitiva(O_cam, D_cam, prim, t_atual_min=np.inf):
     P_loc_hit = O_loc + np.where(np.isfinite(t_hit)[..., None], t_hit[..., None], 0.0) * D_loc
     P_world = np.einsum('ij,...j->...i', prim.M[:3, :3], P_loc_hit) + prim.M[:3, 3]
 
+    M_w_inv_T = np.linalg.inv(prim.M).T
+    N_world = np.einsum('ij,...j->...i', M_w_inv_T[:3, :3], N_loc)
+    nw_len = np.linalg.norm(N_world, axis=-1, keepdims=True)
+    N_world /= np.where(nw_len > 1e-12, nw_len, 1.0)
+
     N_cam = np.einsum('ij,...j->...i', prim.M_inv_T[:3, :3], N_loc)
     nlen = np.linalg.norm(N_cam, axis=-1, keepdims=True)
     N_cam /= np.where(nlen > 1e-12, nlen, 1.0)
 
-    return t_hit, N_cam, P_world, np.zeros(shape, dtype=int)
+    return t_hit, N_cam, P_world, np.zeros(shape, dtype=int), N_world
 
 # ==============================================================================
-# 6. MONTAGEM DO CENÁRIO: BLOCO 734 + ESCULTURA AFASTADA + ÁRVORES + POSTES
+# 6. MONTAGEM DO CENÁRIO: BLOCO 734 + ESCULTURA + ESPELHO D'ÁGUA COM SPOTS
 # ==============================================================================
 def montar_cenario():
     mat_alvenaria_branca = Material("Alvenaria Branca (Bloco 734)", (0.92, 0.93, 0.94), (0.25, 0.25, 0.25), (0.85, 0.85, 0.88), brilho=16.0)
-    mat_aco_branco       = Material("Aço Pintura Branca (Escultura Cinética)", (0.96, 0.97, 0.98), (0.65, 0.68, 0.72), (0.90, 0.91, 0.93), brilho=64.0, refletividade=0.12)
+    mat_aco_branco       = Material("Aço Pintura Branca (Escultura Cinética)", (0.96, 0.97, 0.98), (0.65, 0.68, 0.72), (0.90, 0.91, 0.93), brilho=64.0, refletividade=0.14)
     mat_concreto_base    = Material("Concreto Aparente (Base Escultura)", (0.52, 0.53, 0.55), (0.12, 0.12, 0.12), (0.45, 0.46, 0.48), brilho=12.0)
     mat_vidro_fume       = Material("Vidro Fumê Refletivo", (0.04, 0.05, 0.06), (0.95, 0.95, 0.98), (0.03, 0.03, 0.04), brilho=128.0, refletividade=0.55)
     mat_esquadria        = Material("Esquadria Alumínio Escuro", (0.12, 0.13, 0.15), (0.50, 0.50, 0.55), (0.10, 0.10, 0.12), brilho=48.0)
@@ -604,6 +684,9 @@ def montar_cenario():
     mat_folha_3          = Material("Folhagem Verde Claro", (0.22, 0.60, 0.24), (0.18, 0.25, 0.18), (0.18, 0.50, 0.20), brilho=18.0)
     mat_cone_laranja     = Material("Cone Sinalização Viária", (0.95, 0.35, 0.04), (0.45, 0.40, 0.35), (0.85, 0.30, 0.04), brilho=36.0)
     mat_metal_galv       = Material("Aço Galvanizado (Cobertura)", (0.58, 0.62, 0.66), (0.85, 0.88, 0.90), (0.50, 0.54, 0.58), brilho=80.0, refletividade=0.25)
+    mat_agua_fonte       = Material("Água Espelho d'Água (Refração n=1.333)", (0.12, 0.48, 0.62), (0.95, 0.98, 1.00), (0.08, 0.32, 0.42), brilho=140.0, refletividade=0.42, textura='agua_fonte')
+    mat_borda_fonte      = Material("Borda Granito Escuro (Fonte)", (0.22, 0.24, 0.27), (0.30, 0.32, 0.35), (0.18, 0.20, 0.22), brilho=36.0)
+    mat_spot_submerso    = Material("Spot Submerso LED (Fonte)", (0.75, 0.96, 1.00), (1.00, 1.00, 1.00), (0.70, 0.95, 1.00), brilho=160.0)
 
     materiais_bloco = {
         0: mat_alvenaria_branca,
@@ -624,8 +707,53 @@ def montar_cenario():
     cena.append(Primitiva("Bloco 734 (CT/Asfalto)", "bloco_ct_arqueado", mat_identidade(),
                           mat_alvenaria_branca, dados_extra=dados_bloco))
 
-    # --- ESCULTURA CINÉTICA AFASTADA DO PRÉDIO (X=16.5m, Z=21.0m) COM LOSANGOS A 45° ---
-    dados_escultura = gerar_parametros_escultura_cinetica(origem_base=(16.5, 0.2, 21.0))
+    # --- ESPELHO D'ÁGUA / FONTE FRONTAL COM SPOTS SUBMERSOS PARA CÁUSTICA ---
+    fx_min, fx_max = 19.5, 34.5
+    fz_min, fz_max = 16.8, 22.8
+    f_cx, f_cz = 0.5 * (fx_min + fx_max), 0.5 * (fz_min + fz_max)
+    f_larg, f_prof = fx_max - fx_min, fz_max - fz_min
+    y_agua = 0.42
+
+    # 4 muretas baixas da borda da fonte (altura 0.50m sobre calçada y=0.20m)
+    esp_borda = 0.28
+    alt_borda = 0.34
+    y_centro_borda = 0.20 + alt_borda * 0.5
+    bordas_fonte = [
+        ("Borda Frontal Fonte",  mat_translacao(f_cx, y_centro_borda, fz_min) @ mat_escala(f_larg + esp_borda, alt_borda, esp_borda)),
+        ("Borda Traseira Fonte", mat_translacao(f_cx, y_centro_borda, fz_max) @ mat_escala(f_larg + esp_borda, alt_borda, esp_borda)),
+        ("Borda Esq. Fonte",     mat_translacao(fx_min, y_centro_borda, f_cz) @ mat_escala(esp_borda, alt_borda, f_prof)),
+        ("Borda Dir. Fonte",     mat_translacao(fx_max, y_centro_borda, f_cz) @ mat_escala(esp_borda, alt_borda, f_prof)),
+    ]
+    for nome_b, M_b in bordas_fonte:
+        cena.append(Primitiva(nome_b, "cubo", M_b, mat_borda_fonte))
+
+    # Lâmina d'água ondulada do espelho d'água
+    M_agua = mat_translacao(f_cx, y_agua - 0.04, f_cz) @ mat_escala(f_larg - 0.15, 0.08, f_prof - 0.15)
+    cena.append(Primitiva("Espelho d'Água (Fonte Cáustica)", "cubo", M_agua, mat_agua_fonte))
+
+    # 3 spots submersos fixados na parede interna frontal da fonte apontados para o Bloco 734
+    spots_submersos = []
+    for idx_sp, sx in enumerate([22.0, 27.0, 32.0], start=1):
+        sy = 0.32
+        sz = fz_min + 0.32
+        # Direção inclinada para cima (+Y) e para o fundo/fachada (+Z, +X)
+        alvo_sp = np.array([sx + 2.5, 3.6, 28.0])
+        dir_sp = alvo_sp - np.array([sx, sy, sz])
+        dir_sp /= np.linalg.norm(dir_sp)
+        spots_submersos.append((np.array([sx, sy, sz]), dir_sp))
+
+        M_sp = mat_translacao(sx, sy, sz) @ mat_escala(0.18, 0.14, 0.18)
+        cena.append(Primitiva(f"Spot Submerso Fonte {idx_sp}", "esfera", M_sp, mat_spot_submerso))
+
+    fonte_info = {
+        'x_min': fx_min, 'x_max': fx_max,
+        'z_min': fz_min, 'z_max': fz_max,
+        'y_agua': y_agua,
+        'spots_submersos': spots_submersos
+    }
+
+    # --- ESCULTURA CINÉTICA EM AÇO (5 LOSANGOS A 45°) AO LADO DA FONTE ---
+    dados_escultura = gerar_parametros_escultura_cinetica(origem_base=(15.0, 0.2, 22.0))
     cena.append(Primitiva("Base Concreto (Escultura Cinética)", "cubo", dados_escultura['M_base'], mat_concreto_base))
 
     for q in dados_escultura['quadros']:
@@ -634,11 +762,11 @@ def montar_cenario():
             cena.append(Primitiva(f"Escultura Cinética - Losango {idx_q} (Perfil {b_idx+1})", "cubo", M_barra, mat_aco_branco))
         cena.append(Primitiva(f"Escultura Cinética - Losango {idx_q} (Sapata)", "cubo", q['haste_M'], mat_aco_branco))
 
-    # --- MÚLTIPLAS ÁRVORES NO ENTORNO ---
+    # --- ÁRVORES NO ENTORNO ---
     arvores_cfg = [
         ("Árvore Bosque Esq.",   10.5, 28.5, 1.15),
         ("Árvore Fundo Esq.",    11.5, 38.0, 1.25),
-        ("Árvore Praça Centro",  35.5, 17.8, 0.90),
+        ("Árvore Praça Dir.",    37.5, 17.5, 0.90),
     ]
     esferas_copa_rel = [
         ((0.0, 3.6, 0.0), 1.65, mat_folha_1),
@@ -667,8 +795,8 @@ def montar_cenario():
         arvores_3d_info.append({'x': tx_arv, 'z': tz_arv, 'alt': alt_t, 'esferas': esfs_3d})
 
     # --- CONES DE SINALIZAÇÃO ---
-    M_espelho = mat_espelho_plano_arbitrario((29.5, 0.0, 18.5), (0.8, 0.0, 0.6))
-    cones_base = [(27.5, 0.2, 18.0), (28.6, 0.2, 17.2)]
+    M_espelho = mat_espelho_plano_arbitrario((36.2, 0.0, 16.0), (0.8, 0.0, 0.6))
+    cones_base = [(35.3, 0.2, 16.2), (35.9, 0.2, 15.6)]
     cones_3d_info = []
     for i_c, (cx_c, cy_c, cz_c) in enumerate(cones_base):
         M_cone = mat_translacao(cx_c, cy_c, cz_c) @ mat_escala(0.32, 0.95, 0.32)
@@ -689,10 +817,10 @@ def montar_cenario():
         M_pil = mat_translacao(px_p, 0.2, pz_p) @ mat_escala(0.12, 2.3, 0.12)
         cena.append(Primitiva("Pilar Abrigo Metálico", "cilindro", M_pil, mat_esquadria))
 
-    # --- MÚLTIPLOS POSTES DE ILUMINAÇÃO COM LUMINÁRIAS ---
+    # --- POSTES DE ILUMINAÇÃO PÚBLICA ---
     postes_coords = [
         (9.5, 21.0, 0.6),
-        (25.5, 16.5, 0.0),
+        (18.5, 16.2, 0.4),
         (41.0, 16.5, 0.0),
         (54.5, 17.5, -0.5),
     ]
@@ -705,12 +833,13 @@ def montar_cenario():
     extras_3d = {
         'arvores': arvores_3d_info,
         'postes': postes_coords,
-        'cones': cones_3d_info
+        'cones': cones_3d_info,
+        'fonte': fonte_info
     }
     return cena, materiais_bloco, dados_escultura, extras_3d
 
 # ==============================================================================
-# 7. MOTOR DE RENDERIZAÇÃO (RAY CASTING COM BOUNDING VOLUME GLOBAL + LOCAL)
+# 7. MOTOR DE RENDERIZAÇÃO (DIA/NOITE + CÁUSTICA + BOUNDING BOX AABB)
 # ==============================================================================
 class RenderizadorCT:
     def __init__(self, largura=500, altura=500):
@@ -723,13 +852,13 @@ class RenderizadorCT:
 
         self.presets = {
             '2_pontos_fuga': {
-                'titulo': 'Perspectiva - 2 Pontos de Fuga (Vista Principal Bloco 734 + Escultura)',
+                'titulo': 'Perspectiva - 2 Pontos de Fuga (Bloco 734 + Escultura + Fonte)',
                 'eye': [6.5, 3.4, 5.5], 'at': [28.0, 2.8, 28.0], 'up': [0.0, 1.0, 0.0],
                 'd': 1.5, 'win': (-1.02, 1.02, -1.02, 1.02), 'proj': 'perspectiva'
             },
             '1_ponto_fuga': {
-                'titulo': 'Perspectiva - 1 Ponto de Fuga (Frontal Alinhada)',
-                'eye': [28.5, 3.3, 3.5], 'at': [28.5, 3.3, 30.0], 'up': [0.0, 1.0, 0.0],
+                'titulo': 'Perspectiva - 1 Ponto de Fuga (Frontal Fonte e Fachada)',
+                'eye': [27.0, 3.1, 4.5], 'at': [27.0, 2.8, 26.0], 'up': [0.0, 1.0, 0.0],
                 'd': 1.5, 'win': (-1.05, 1.05, -1.05, 1.05), 'proj': 'perspectiva'
             },
             '3_pontos_fuga': {
@@ -738,9 +867,9 @@ class RenderizadorCT:
                 'd': 1.5, 'win': (-0.98, 0.98, -0.98, 0.98), 'proj': 'perspectiva'
             },
             'zoom_in': {
-                'titulo': 'Zoom In (Detalhe Escultura Cinética - 5 Losangos a 45°)',
-                'eye': [11.2, 2.4, 13.8], 'at': [16.5, 2.1, 21.0], 'up': [0.0, 1.0, 0.0],
-                'd': 2.0, 'win': (-0.82, 0.82, -0.82, 0.82), 'proj': 'perspectiva'
+                'titulo': 'Zoom In (Escultura 5 Losangos + Espelho d\'Água)',
+                'eye': [10.5, 2.5, 13.0], 'at': [18.5, 2.2, 22.0], 'up': [0.0, 1.0, 0.0],
+                'd': 1.85, 'win': (-0.88, 0.88, -0.88, 0.88), 'proj': 'perspectiva'
             },
             'zoom_out': {
                 'titulo': 'Zoom Out (Campo de Visão Ampliado)',
@@ -769,27 +898,29 @@ class RenderizadorCT:
         shape = D_cam.shape[:-1]
         t_min = np.full(shape, np.inf)
         N_min = np.zeros_like(D_cam)
+        N_w_min = np.zeros_like(D_cam)
         P_w_min = np.zeros_like(D_cam)
         obj_idx = np.full(shape, -1, dtype=int)
         sub_mat_min = np.zeros(shape, dtype=int)
 
         g_min, g_max = self._aabb_global_cena()
         if not np.any(testar_aabb(O_cam, D_cam, g_min, g_max)):
-            return t_min, N_min, P_w_min, obj_idx, sub_mat_min
+            return t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min
 
         for idx, prim in enumerate(self.cena):
-            t_o, N_o, P_w, sub_m = intersect_primitiva(O_cam, D_cam, prim, t_min)
+            t_o, N_o, P_w, sub_m, N_w = intersect_primitiva(O_cam, D_cam, prim, t_min)
             m = t_o < t_min
             if np.any(m):
                 t_min = np.where(m, t_o, t_min)
                 N_min = np.where(m[..., None], N_o, N_min)
+                N_w_min = np.where(m[..., None], N_w, N_w_min)
                 P_w_min = np.where(m[..., None], P_w, P_w_min)
                 obj_idx = np.where(m, idx, obj_idx)
                 sub_mat_min = np.where(m, sub_m, sub_mat_min)
 
-        return t_min, N_min, P_w_min, obj_idx, sub_mat_min
+        return t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min
 
-    def sombrear(self, O_cam, D_cam, t_min, N_min, P_w_min, obj_idx, sub_mat_min, luzes, permitir_reflexo=True):
+    def sombrear(self, O_cam, D_cam, t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min, luzes, modo_noite=False, permitir_reflexo=True):
         shape = D_cam.shape[:-1]
         hit = np.isfinite(t_min)
         P_cam = np.where(hit[..., None], O_cam + t_min[..., None] * D_cam, 0.0)
@@ -803,6 +934,7 @@ class RenderizadorCT:
         Ka = np.zeros_like(D_cam)
         brilho = np.full(shape, 32.0)
         refl = np.zeros(shape)
+        emissivo = np.zeros_like(D_cam)
 
         for idx, prim in enumerate(self.cena):
             m = (obj_idx == idx)
@@ -826,55 +958,74 @@ class RenderizadorCT:
                 brilho = np.where(m, prim.mat.brilho, brilho)
                 refl = np.where(m, prim.mat.refletividade, refl)
 
-        cor = Ka * luzes['I_amb']
+                # Luminárias dos postes e spots submersos brilham diretamente à noite
+                if "Luminária Poste" in prim.nome:
+                    emissivo = np.where(m[..., None], np.array([1.0, 0.90, 0.62]) * (1.25 if modo_noite else 0.15), emissivo)
+                elif "Spot Submerso" in prim.nome:
+                    emissivo = np.where(m[..., None], np.array([0.65, 0.96, 1.00]) * (1.40 if modo_noite else 0.35), emissivo)
+
+        cor = Ka * luzes['I_amb'] + emissivo
         P_eps = P_cam + N_min * 0.02
 
-        L_dir = -luzes['dir_cam']
-        sombra_dir = np.zeros(shape, dtype=bool)
-        D_dir_bcast = np.broadcast_to(L_dir, D_cam.shape)
-        for prim in self.cena[2:]:
-            ts, _, _, _ = intersect_primitiva(P_eps, D_dir_bcast, prim)
-            sombra_dir |= (hit & np.isfinite(ts))
-        ndl_d = np.maximum(0.0, np.einsum('...i,i->...', N_min, L_dir))
-        R_d = 2.0 * ndl_d[..., None] * N_min - L_dir
-        rdv_d = np.maximum(0.0, np.einsum('...i,...i->...', R_d, V_cam))
-        cor += (~sombra_dir)[..., None] * (Kd * luzes['I_dir'] * ndl_d[..., None] +
-                                           Ke * luzes['I_dir'] * (rdv_d[..., None] ** brilho[..., None]))
+        # 1. Luz Solar Direcional (ativa apenas no modo DIA)
+        if not modo_noite:
+            L_dir = -luzes['dir_cam']
+            sombra_dir = np.zeros(shape, dtype=bool)
+            D_dir_bcast = np.broadcast_to(L_dir, D_cam.shape)
+            for prim in self.cena[2:]:
+                ts, _, _, _, _ = intersect_primitiva(P_eps, D_dir_bcast, prim)
+                sombra_dir |= (hit & np.isfinite(ts))
+            ndl_d = np.maximum(0.0, np.einsum('...i,i->...', N_min, L_dir))
+            R_d = 2.0 * ndl_d[..., None] * N_min - L_dir
+            rdv_d = np.maximum(0.0, np.einsum('...i,...i->...', R_d, V_cam))
+            cor += (~sombra_dir)[..., None] * (Kd * luzes['I_dir'] * ndl_d[..., None] +
+                                               Ke * luzes['I_dir'] * (rdv_d[..., None] ** brilho[..., None]))
 
-        L_p_vec = luzes['pont_cam'] - P_cam
-        dist_p = np.linalg.norm(L_p_vec, axis=-1)
-        L_p = L_p_vec / np.where(dist_p[..., None] > 1e-8, dist_p[..., None], 1.0)
-        sombra_p = np.zeros(shape, dtype=bool)
-        for prim in self.cena[2:]:
-            ts, _, _, _ = intersect_primitiva(P_eps, L_p, prim, dist_p)
-            sombra_p |= (hit & (ts < dist_p))
-        ndl_p = np.maximum(0.0, np.einsum('...i,...i->...', N_min, L_p))
-        R_p = 2.0 * ndl_p[..., None] * N_min - L_p
-        rdv_p = np.maximum(0.0, np.einsum('...i,...i->...', R_p, V_cam))
-        cor += (~sombra_p)[..., None] * (Kd * luzes['I_pont'] * ndl_p[..., None] +
-                                         Ke * luzes['I_pont'] * (rdv_p[..., None] ** brilho[..., None]))
+        # 2. Luzes Artificiais dos Postes (Iluminação Pública da Praça)
+        for p_cam, i_poste in luzes['postes_cam']:
+            L_p_vec = p_cam - P_cam
+            dist_p = np.linalg.norm(L_p_vec, axis=-1)
+            L_p = L_p_vec / np.where(dist_p[..., None] > 1e-8, dist_p[..., None], 1.0)
+            aten_p = 1.0 / (1.0 + 0.008 * (dist_p**2))
+            ndl_p = np.maximum(0.0, np.einsum('...i,...i->...', N_min, L_p))
+            R_p = 2.0 * ndl_p[..., None] * N_min - L_p
+            rdv_p = np.maximum(0.0, np.einsum('...i,...i->...', R_p, V_cam))
+            cor += aten_p[..., None] * (Kd * i_poste * ndl_p[..., None] +
+                                        Ke * i_poste * (rdv_p[..., None] ** brilho[..., None]))
 
+        # 3. Spot Direcionado para a Escultura Cinética
         L_s_vec = luzes['spot_pos_cam'] - P_cam
         dist_s = np.linalg.norm(L_s_vec, axis=-1)
         L_s = L_s_vec / np.where(dist_s[..., None] > 1e-8, dist_s[..., None], 1.0)
         cos_ang = np.einsum('...i,i->...', -L_s, luzes['spot_dir_cam'])
         fator_spot = np.where(cos_ang >= luzes['spot_cos_cutoff'],
-                              np.maximum(0.0, cos_ang) ** 8.0, 0.0)
+                              np.maximum(0.0, cos_ang) ** 6.0, 0.0)
+        aten_s = 1.0 / (1.0 + 0.006 * (dist_s**2))
         ndl_s = np.maximum(0.0, np.einsum('...i,...i->...', N_min, L_s))
-        cor += fator_spot[..., None] * (Kd * luzes['I_spot'] * ndl_s[..., None])
+        cor += (fator_spot * aten_s)[..., None] * (Kd * luzes['I_spot'] * ndl_s[..., None])
 
+        # 4. Cáusticas Refratadas pelo Espelho d'Água na Fachada e Escultura
+        cor_caustica = calcular_caustica_fonte(P_w_min, N_w_min, self.extras_3d['fonte'], modo_noite)
+        cor += cor_caustica
+
+        # 5. Reflexão Especular (Água, Vidro Fumê, Aço)
         if permitir_reflexo and np.any(refl > 0.01):
             D_refl = D_cam - 2.0 * np.einsum('...i,...i->...', D_cam, N_min)[..., None] * N_min
             D_refl /= np.linalg.norm(D_refl, axis=-1, keepdims=True)
-            t_r, N_r, P_wr, idx_r, sub_r = self.tracar_raios(P_eps, D_refl)
-            cor_r = self.sombrear(P_eps, D_refl, t_r, N_r, P_wr, idx_r, sub_r, luzes, permitir_reflexo=False)
+            t_r, N_r, P_wr, idx_r, sub_r, Nw_r = self.tracar_raios(P_eps, D_refl)
+            cor_r = self.sombrear(P_eps, D_refl, t_r, N_r, P_wr, idx_r, sub_r, Nw_r, luzes, modo_noite=modo_noite, permitir_reflexo=False)
             cor = (1.0 - refl[..., None]) * cor + refl[..., None] * cor_r
 
+        # Fundo Céu (Dia claro vs Noite profunda)
         ceu_t = np.clip(0.5 + 0.5 * D_cam[..., 1], 0.0, 1.0)[..., None]
-        ceu = (1.0 - ceu_t) * np.array([0.82, 0.90, 0.98]) + ceu_t * np.array([0.32, 0.58, 0.88])
+        if modo_noite:
+            ceu = (1.0 - ceu_t) * np.array([0.04, 0.07, 0.14]) + ceu_t * np.array([0.01, 0.02, 0.06])
+        else:
+            ceu = (1.0 - ceu_t) * np.array([0.82, 0.90, 0.98]) + ceu_t * np.array([0.32, 0.58, 0.88])
+
         return np.where(hit[..., None], np.clip(cor, 0.0, 1.0), ceu)
 
-    def renderizar_config(self, cfg):
+    def renderizar_config(self, cfg, modo_noite=False):
         t0 = time.time()
         M_wc = construir_Mwc(cfg['eye'], cfg['at'], cfg['up'])
 
@@ -884,21 +1035,28 @@ class RenderizadorCT:
         dir_w = np.array([0.45, -0.75, 0.48, 0.0])
         dir_c = (M_wc @ dir_w)[:3]; dir_c /= np.linalg.norm(dir_c)
 
-        pont_w = np.array([25.0, 16.0, 12.0, 1.0])
-        pont_c = (M_wc @ pont_w)[:3]
+        # Converte posições dos 4 postes de iluminação pública para coordenadas de câmera
+        intensidade_poste = np.array([1.45, 1.25, 0.85]) if modo_noite else np.array([0.18, 0.18, 0.16])
+        postes_cam = []
+        for px_pos, pz_pos, off_lum_x in self.extras_3d['postes']:
+            pw = np.array([px_pos + off_lum_x, 6.1, pz_pos + 0.4, 1.0])
+            postes_cam.append(((M_wc @ pw)[:3], intensidade_poste))
 
-        spot_pos_w = np.array([9.5, 6.2, 21.0, 1.0])
-        spot_alvo_w = np.array([16.5, 2.2, 21.0, 1.0])
+        spot_pos_w = np.array([18.5, 6.1, 16.2, 1.0])
+        spot_alvo_w = np.array([15.0, 2.2, 22.0, 1.0])
         spot_pos_c = (M_wc @ spot_pos_w)[:3]
         spot_dir_c = (M_wc @ (spot_alvo_w - spot_pos_w))[:3]
         spot_dir_c /= np.linalg.norm(spot_dir_c)
 
         luzes = {
-            'I_amb': np.array([0.26, 0.27, 0.30]),
-            'dir_cam': dir_c,  'I_dir':  np.array([0.75, 0.73, 0.68]),
-            'pont_cam': pont_c, 'I_pont': np.array([0.45, 0.45, 0.48]),
-            'spot_pos_cam': spot_pos_c, 'spot_dir_cam': spot_dir_c,
-            'spot_cos_cutoff': np.cos(np.deg2rad(35.0)), 'I_spot': np.array([1.2, 1.15, 0.95])
+            'I_amb': np.array([0.06, 0.08, 0.14]) if modo_noite else np.array([0.26, 0.27, 0.30]),
+            'dir_cam': dir_c,
+            'I_dir': np.array([0.0, 0.0, 0.0]) if modo_noite else np.array([0.75, 0.73, 0.68]),
+            'postes_cam': postes_cam,
+            'spot_pos_cam': spot_pos_c,
+            'spot_dir_cam': spot_dir_c,
+            'spot_cos_cutoff': np.cos(np.deg2rad(42.0)),
+            'I_spot': np.array([1.85, 1.70, 1.35]) if modo_noite else np.array([0.45, 0.45, 0.42])
         }
 
         xmin, xmax, ymin, ymax = cfg['win']
@@ -922,8 +1080,8 @@ class RenderizadorCT:
             d_vec /= np.linalg.norm(d_vec)
             D_cam = np.broadcast_to(d_vec, O_cam.shape).copy()
 
-        t_min, N_min, P_w_min, obj_idx, sub_mat_min = self.tracar_raios(O_cam, D_cam)
-        img = self.sombrear(O_cam, D_cam, t_min, N_min, P_w_min, obj_idx, sub_mat_min, luzes)
+        t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min = self.tracar_raios(O_cam, D_cam)
+        img = self.sombrear(O_cam, D_cam, t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min, luzes, modo_noite=modo_noite)
 
         self.ultimo_buffer_pick = {
             'obj_idx': obj_idx,
@@ -931,29 +1089,37 @@ class RenderizadorCT:
             'P_world': P_w_min,
             't_min': t_min
         }
-        print(f"[{cfg['titulo']}] Renderizado em {time.time() - t0:.2f}s (AABB Ativo | 500x500 px)")
-        return img, cfg['titulo']
+        turno_txt = "NOITE (Luz Artificial + Cáusticas)" if modo_noite else "DIA (Sol + Cáusticas Suaves)"
+        print(f"[{cfg['titulo']} | {turno_txt}] Renderizado em {time.time() - t0:.2f}s ({self.W}x{self.H} px)")
+        return img, f"{cfg['titulo']} [{turno_txt}]"
 
 # ==============================================================================
-# 8. VIEWPORT INTERATIVA 3D COMPLETA (ESTILOS REVIT + TRAVA 0° A 90°)
+# 8. VIEWPORT INTERATIVA 3D (SUPORTE A DIA / NOITE + ESPELHO D'ÁGUA)
 # ==============================================================================
-def desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual='materiais', cfg_cam=None):
+def desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual='materiais', cfg_cam=None, modo_noite=False):
     ax_3d.clear()
     cx, cz, R = 37.0, 42.0, 22.0
     H = 6.6
 
+    ax_3d.set_facecolor('#0B1120' if modo_noite else '#FFFFFF')
+
     if estilo_visual == 'wireframe':
         c_bloco, c_teto, c_vidro, c_734 = 'none', 'none', 'none', 'none'
-        c_asfalto, c_calcada, c_tronco, c_poste = 'none', 'none', '#334155', '#334155'
-        c_abrigo, c_base_esc, c_esc_aco, edge_c, alpha_f = 'none', 'none', '#0F172A', '#0F172A', 0.0
+        c_asfalto, c_calcada, c_tronco, c_poste = 'none', 'none', '#64748B', '#94A3B8'
+        c_abrigo, c_base_esc, c_esc_aco, c_agua, edge_c, alpha_f = 'none', 'none', '#38BDF8' if modo_noite else '#0F172A', 'none', '#38BDF8' if modo_noite else '#0F172A', 0.0
     elif estilo_visual == 'shaded':
-        c_bloco, c_teto, c_vidro, c_734 = '#CBD5E1', '#94A3B8', '#64748B', '#475569'
-        c_asfalto, c_calcada, c_tronco, c_poste = '#94A3B8', '#E2E8F0', '#64748B', '#475569'
-        c_abrigo, c_base_esc, c_esc_aco, edge_c, alpha_f = '#94A3B8', '#64748B', '#F8FAFC', '#334155', 0.95
-    else:  # 'materiais'
-        c_bloco, c_teto, c_vidro, c_734 = '#F8FAFC', '#E2E8F0', '#1E293B', '#1E3A8A'
-        c_asfalto, c_calcada, c_tronco, c_poste = '#334155', '#CBD5E1', '#5C3A21', '#1E293B'
-        c_abrigo, c_base_esc, c_esc_aco, edge_c, alpha_f = '#94A3B8', '#64748B', '#FFFFFF', '#475569', 0.95
+        c_bloco, c_teto, c_vidro, c_734 = ('#334155', '#1E293B', '#0F172A', '#1E3A8A') if modo_noite else ('#CBD5E1', '#94A3B8', '#64748B', '#475569')
+        c_asfalto, c_calcada, c_tronco, c_poste = ('#1E293B', '#475569', '#475569', '#94A3B8') if modo_noite else ('#94A3B8', '#E2E8F0', '#64748B', '#475569')
+        c_abrigo, c_base_esc, c_esc_aco, c_agua, edge_c, alpha_f = '#475569', '#64748B', '#E0F2FE', '#0284C7', '#1E293B', 0.95
+    else:
+        if modo_noite:
+            c_bloco, c_teto, c_vidro, c_734 = '#3B4D6B', '#1E293B', '#090D16', '#1D4ED8'
+            c_asfalto, c_calcada, c_tronco, c_poste = '#111827', '#334155', '#3B2314', '#64748B'
+            c_abrigo, c_base_esc, c_esc_aco, c_agua, edge_c, alpha_f = '#475569', '#334155', '#E0F2FE', '#06B6D4', '#0F172A', 0.95
+        else:
+            c_bloco, c_teto, c_vidro, c_734 = '#F8FAFC', '#E2E8F0', '#1E293B', '#1E3A8A'
+            c_asfalto, c_calcada, c_tronco, c_poste = '#334155', '#CBD5E1', '#5C3A21', '#1E293B'
+            c_abrigo, c_base_esc, c_esc_aco, c_agua, edge_c, alpha_f = '#94A3B8', '#64748B', '#FFFFFF', '#38BDF8', '#475569', 0.95
 
     # 1. Piso
     if estilo_visual != 'wireframe':
@@ -1016,6 +1182,22 @@ def desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual='materiais', cfg_
     ]]
     ax_3d.add_collection3d(Poly3DCollection(placa_poly, facecolors=c_734, edgecolors='#1E3A8A', alpha=0.95 if estilo_visual != 'wireframe' else 0.0, linewidths=1.0))
 
+    # 3A. ESPELHO D'ÁGUA (FONTE) + SPOTS SUBMERSOS + FEIXES DE CÁUSTICA NO PREVIEW
+    f_inf = renderer.extras_3d['fonte']
+    fx0, fx1, fz0, fz1, ya = f_inf['x_min'], f_inf['x_max'], f_inf['z_min'], f_inf['z_max'], f_inf['y_agua']
+    poly_agua = [[(fx0, fz0, ya), (fx1, fz0, ya), (fx1, fz1, ya), (fx0, fz1, ya)]]
+    ax_3d.add_collection3d(Poly3DCollection(poly_agua, facecolors=c_agua, edgecolors='#0284C7', alpha=0.85 if estilo_visual != 'wireframe' else 0.0, linewidths=1.2))
+    if estilo_visual == 'wireframe':
+        ax_3d.plot([fx0, fx1, fx1, fx0, fx0], [fz0, fz0, fz1, fz1, fz0], [ya]*5, color='#0284C7', lw=1.2)
+
+    for sp_pos, sp_dir in f_inf['spots_submersos']:
+        ax_3d.scatter([sp_pos[0]], [sp_pos[2]], [sp_pos[1]], color='#67E8F9', s=45)
+        if modo_noite:
+            # Feixe indicativo dos spots da fonte projetando cáusticas na fachada
+            p_fim = sp_pos + sp_dir * 9.5
+            ax_3d.plot([sp_pos[0], p_fim[0]], [sp_pos[2], p_fim[2]], [sp_pos[1], p_fim[1]],
+                       color='#67E8F9', linestyle='--', linewidth=1.1, alpha=0.65)
+
     # 3B. ESCULTURA CINÉTICA EM AÇO (5 Losangos a 45° + Base Concreto)
     esc = renderer.dados_escultura
     bp = esc['base_pts_world']
@@ -1047,14 +1229,15 @@ def desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual='materiais', cfg_
             if estilo_visual == 'wireframe':
                 ax_3d.plot_wireframe(xs, zs, ys, color='#15803D', linewidth=0.5)
             else:
-                cor_atual = '#94A3B8' if estilo_visual == 'shaded' else cor_e
+                cor_atual = '#475569' if estilo_visual == 'shaded' else ('#064E3B' if modo_noite else cor_e)
                 ax_3d.plot_surface(xs, zs, ys, color=cor_atual, alpha=0.9, linewidth=0)
 
     # 5. Postes
     for px_pos, pz_pos, off_lx in renderer.extras_3d['postes']:
         ax_3d.plot([px_pos, px_pos], [pz_pos, pz_pos], [0.2, 6.4], color=c_poste, linewidth=2.5)
         ax_3d.plot([px_pos, px_pos + off_lx], [pz_pos, pz_pos + 0.4], [6.4, 6.3], color=c_poste, linewidth=2.0)
-        ax_3d.scatter([px_pos + off_lx], [pz_pos + 0.4], [6.3], color='#FDE047' if estilo_visual == 'materiais' else '#475569', s=35)
+        cor_luz = '#FDE047' if (modo_noite or estilo_visual == 'materiais') else '#475569'
+        ax_3d.scatter([px_pos + off_lx], [pz_pos + 0.4], [6.3], color=cor_luz, s=75 if modo_noite else 35)
 
     # 6. Abrigo Metálico
     prim_malha = next(p for p in renderer.cena if p.tipo == 'malha')
@@ -1078,15 +1261,17 @@ def desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual='materiais', cfg_
     XD = c_domo[0] + r_domo * np.cos(EL) * np.cos(AZ)
     ZD = c_domo[2] + r_domo * np.cos(EL) * np.sin(AZ)
     YD = c_domo[1] + r_domo * np.sin(EL)
-    ax_3d.plot_wireframe(XD, ZD, YD, color='#0284C7', alpha=0.14, linewidth=0.6)
+    ax_3d.plot_wireframe(XD, ZD, YD, color='#38BDF8' if modo_noite else '#0284C7', alpha=0.14, linewidth=0.6)
 
     ax_3d.set_xlim(2, 68)
     ax_3d.set_ylim(2, 60)
     ax_3d.set_zlim(0, 26)
     ax_3d.set_box_aspect((66, 58, 26))
-    ax_3d.set_xlabel('X (m)')
-    ax_3d.set_ylabel('Z (m)')
-    ax_3d.set_zlabel('Y Altura (m)')
+    cor_eixo = '#E2E8F0' if modo_noite else '#0F172A'
+    ax_3d.set_xlabel('X (m)', color=cor_eixo)
+    ax_3d.set_ylabel('Z (m)', color=cor_eixo)
+    ax_3d.set_zlabel('Y Altura (m)', color=cor_eixo)
+    ax_3d.tick_params(colors=cor_eixo)
 
     if cfg_cam is not None:
         eye = np.array(cfg_cam['eye'], dtype=np.float64)
@@ -1102,12 +1287,12 @@ def desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual='materiais', cfg_
             ax_3d.set_proj_type('persp')
 
 # ==============================================================================
-# 9. INTERFACE GRÁFICA INTERATIVA (MODOS REVIT + TRAVA 0° A 90° + RENDER)
+# 9. INTERFACE GRÁFICA INTERATIVA (BOTÃO GLOBAL DIA / NOITE + CÁUSTICAS + RENDER)
 # ==============================================================================
 def iniciar_aplicacao():
     renderer = RenderizadorCT(largura=500, altura=500)
 
-    fig = plt.figure(figsize=(9.2, 9.5))
+    fig = plt.figure(figsize=(9.5, 9.6))
     plt.subplots_adjust(bottom=0.21, top=0.83, left=0.05, right=0.95)
 
     ax_rc = fig.add_subplot(111)
@@ -1121,16 +1306,17 @@ def iniciar_aplicacao():
     estado = {
         'em_render': False,
         'modo_painel': False,
+        'modo_noite': False,
         'estilo_revit': 'materiais',
         'cfg_atual': renderer.presets['2_pontos_fuga'].copy(),
         'usou_orbita_livre': False
     }
 
-    desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=estado['estilo_revit'], cfg_cam=estado['cfg_atual'])
+    desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=estado['estilo_revit'], cfg_cam=estado['cfg_atual'], modo_noite=estado['modo_noite'])
     ax_3d.set_title(
-        f"PREVIEW INTERATIVO ({estado['estilo_revit'].upper()}) - {estado['cfg_atual']['titulo']}\n"
-        "Arraste para girar (Elevação travada entre 0° piso e 90° topo) ou clique em [RENDER FINAL]",
-        fontsize=9.2, color='#0F172A'
+        f"PREVIEW INTERATIVO [DIA] ({estado['estilo_revit'].upper()}) - {estado['cfg_atual']['titulo']}\n"
+        "Alterne [Dia / Noite] para acender postes + spots da fonte (Cáusticas) e clique em [RENDER FINAL]",
+        fontsize=9.0, color='#0F172A'
     )
 
     ax_painel_bg = fig.add_axes([0.12, 0.24, 0.76, 0.57])
@@ -1197,11 +1383,11 @@ def iniciar_aplicacao():
             estado['usou_orbita_livre'] = False
             estado['em_render'] = False
             mostrar_painel(False)
-            desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=estado['estilo_revit'], cfg_cam=estado['cfg_atual'])
+            desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=estado['estilo_revit'], cfg_cam=estado['cfg_atual'], modo_noite=estado['modo_noite'])
             ax_3d.set_title(
                 f"PREVIEW ({estado['estilo_revit'].upper()}): {estado['cfg_atual']['titulo']}\n"
                 "Clique em [RENDER FINAL] para calcular Ray Casting desta câmera",
-                fontsize=9.5, color='#0F172A'
+                fontsize=9.2, color='#0F172A'
             )
             fig.canvas.draw_idle()
         except Exception as erro:
@@ -1211,7 +1397,6 @@ def iniciar_aplicacao():
     btn_aplicar.on_clicked(on_aplicar_camera)
     btn_cancelar.on_clicked(lambda _e: mostrar_painel(False))
 
-    # Trava rigorosa de elevação entre 0° (piso) e 90° (topo) - sem capotagem
     def travar_elevacao_0_90(event=None):
         if estado['em_render'] or estado['modo_painel']:
             return
@@ -1253,11 +1438,12 @@ def iniciar_aplicacao():
     fig.canvas.mpl_connect('button_press_event', on_click)
 
     botoes_topo = [
-        ('Linhas (Wire)',  'wireframe',   [0.04, 0.90, 0.17, 0.055], '#F1F5F9'),
-        ('Planos (Shade)', 'shaded',      [0.22, 0.90, 0.17, 0.055], '#E2E8F0'),
-        ('Materiais',      'materiais',   [0.40, 0.90, 0.16, 0.055], '#DBEAFE'),
-        ('Cam Manual',     'cam_manual',  [0.57, 0.90, 0.17, 0.055], '#BAE6FD'),
-        ('RENDER FINAL',   'render_now',  [0.75, 0.90, 0.21, 0.055], '#86EFAC'),
+        ('Linhas (Wire)',  'wireframe',   [0.03, 0.90, 0.14, 0.055], '#F1F5F9'),
+        ('Planos (Shade)', 'shaded',      [0.18, 0.90, 0.14, 0.055], '#E2E8F0'),
+        ('Materiais',      'materiais',   [0.33, 0.90, 0.13, 0.055], '#DBEAFE'),
+        ('Cam Manual',     'cam_manual',  [0.47, 0.90, 0.13, 0.055], '#BAE6FD'),
+        ('Modo: DIA',      'dia_noite',   [0.61, 0.90, 0.15, 0.055], '#FEF08A'),
+        ('RENDER FINAL',   'render_now',  [0.77, 0.90, 0.20, 0.055], '#86EFAC'),
     ]
 
     botoes_base = [
@@ -1270,7 +1456,7 @@ def iniciar_aplicacao():
         ('Oblíqua',        'obliqua',       [0.50, 0.03, 0.21, 0.055]),
         ('Abóbada 3D',     'abobada_3d',    [0.73, 0.03, 0.23, 0.055]),
     ]
-    botoes_refs = []
+    botoes_refs = {}
 
     def alternar_estilo_revit(novo_estilo):
         def callback(_event):
@@ -1280,16 +1466,17 @@ def iniciar_aplicacao():
             estado['em_render'] = False
             ax_rc.set_visible(False)
             ax_3d.set_visible(True)
-            desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=novo_estilo, cfg_cam=None)
+            desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=novo_estilo, cfg_cam=None, modo_noite=estado['modo_noite'])
+            turno = "NOITE" if estado['modo_noite'] else "DIA"
             ax_3d.set_title(
-                f"ESTILO VISUAL: {novo_estilo.upper()} (Navegação Leve - Giro 0° a 90°)\n"
-                "Clique em [RENDER FINAL] quando desejar calcular o Ray Casting",
-                fontsize=9.5, color='#0F172A'
+                f"ESTILO: {novo_estilo.upper()} [{turno}] (Giro 0° a 90°)\n"
+                "Clique em [RENDER FINAL] para calcular Ray Casting e Cáusticas",
+                fontsize=9.2, color='#0F172A'
             )
             fig.canvas.draw_idle()
         return callback
 
-    def executar_render_final(_event):
+    def executar_render_final(_event=None):
         if estado['modo_painel']:
             mostrar_painel(False)
 
@@ -1304,7 +1491,7 @@ def iniciar_aplicacao():
                 c_domo[2] + r_domo * np.cos(el) * np.sin(az)
             ]
             cfg_render = {
-                'titulo': f'RayCast Abóbada 3D (Azimute={azim_deg:.0f}°, Elevação={elev_deg:.0f}°)',
+                'titulo': f'RayCast Abóbada 3D (Az={azim_deg:.0f}°, El={elev_deg:.0f}°)',
                 'eye': eye_domo, 'at': c_domo.tolist(), 'up': [0.0, 1.0, 0.0],
                 'd': 1.5, 'win': (-0.95, 0.95, -0.95, 0.95),
                 'proj': estado['cfg_atual'].get('proj', 'perspectiva')
@@ -1315,14 +1502,42 @@ def iniciar_aplicacao():
         estado['em_render'] = True
         ax_3d.set_visible(False)
         ax_rc.set_visible(True)
-        ax_rc.set_title("Calculando Ray Casting 500x500 (AABB Ativo | Texturas, Sombras e 4 Luzes)...", fontsize=10, color='darkred')
+        turno_lbl = "NOITE (Postes + Spots Submersos + Cáusticas)" if estado['modo_noite'] else "DIA (Sol + Cáusticas)"
+        ax_rc.set_title(f"Renderizando Ray Casting 500x500 — {turno_lbl}...", fontsize=9.5, color='darkred')
         fig.canvas.draw_idle()
         plt.pause(0.05)
 
-        nova_img, novo_tit = renderer.renderizar_config(cfg_render)
+        nova_img, novo_tit = renderer.renderizar_config(cfg_render, modo_noite=estado['modo_noite'])
         im_plot.set_data(nova_img)
-        ax_rc.set_title(f"RENDERIZADO: {novo_tit}\n(Clique na imagem para PICK | Escolha outro estilo acima para voltar ao 3D leve)", fontsize=9, color='black')
+        ax_rc.set_title(f"RENDERIZADO: {novo_tit}\n(Clique na imagem para PICK | Alterne [Modo: DIA/NOITE] ou estilos acima)", fontsize=8.8, color='black')
         fig.canvas.draw_idle()
+
+    def alternar_dia_noite(_event):
+        estado['modo_noite'] = not estado['modo_noite']
+        btn_dn = botoes_refs['dia_noite']
+        if estado['modo_noite']:
+            btn_dn.label.set_text('Modo: NOITE')
+            btn_dn.color = '#1E293B'
+            btn_dn.hovercolor = '#334155'
+            btn_dn.label.set_color('#38BDF8')
+        else:
+            btn_dn.label.set_text('Modo: DIA')
+            btn_dn.color = '#FEF08A'
+            btn_dn.hovercolor = '#FDE047'
+            btn_dn.label.set_color('#0F172A')
+
+        # Se já estiver na imagem renderizada, re-renderiza imediatamente no novo ciclo Dia/Noite!
+        if estado['em_render']:
+            executar_render_final()
+        else:
+            desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=estado['estilo_revit'], cfg_cam=None, modo_noite=estado['modo_noite'])
+            turno = "NOITE (Luz Artificial + Cáusticas Ativas)" if estado['modo_noite'] else "DIA (Luz Solar)"
+            ax_3d.set_title(
+                f"CICLO ALTERADO: {turno}\n"
+                "Clique em [RENDER FINAL] para visualizar as cáusticas na fachada do Bloco 734",
+                fontsize=9.2, color='#0369A1' if estado['modo_noite'] else '#0F172A'
+            )
+            fig.canvas.draw_idle()
 
     def selecionar_preset_leve(chave):
         def callback(_event):
@@ -1333,11 +1548,11 @@ def iniciar_aplicacao():
                 estado['em_render'] = False
                 ax_rc.set_visible(False)
                 ax_3d.set_visible(True)
-                desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=estado['estilo_revit'], cfg_cam=None)
+                desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=estado['estilo_revit'], cfg_cam=None, modo_noite=estado['modo_noite'])
                 ax_3d.set_title(
-                    f"ABÓBADA SEMI-ESFÉRICA 3D ({estado['estilo_revit'].upper()}) - Elevação travada 0° a 90°\n"
+                    f"ABÓBADA SEMI-ESFÉRICA 3D ({estado['estilo_revit'].upper()}) - Elevação 0° a 90°\n"
                     "Gire ao redor e clique em [RENDER FINAL] para renderizar",
-                    fontsize=9.5, color='#0369A1'
+                    fontsize=9.2, color='#0369A1'
                 )
                 fig.canvas.draw_idle()
                 return
@@ -1355,11 +1570,11 @@ def iniciar_aplicacao():
 
             ax_rc.set_visible(False)
             ax_3d.set_visible(True)
-            desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=estado['estilo_revit'], cfg_cam=cfg_p)
+            desenhar_cena_3d_interativa(ax_3d, renderer, estilo_visual=estado['estilo_revit'], cfg_cam=cfg_p, modo_noite=estado['modo_noite'])
             ax_3d.set_title(
-                f"PREVIEW INSTANTÂNEO ({estado['estilo_revit'].upper()}): {cfg_p['titulo']}\n"
+                f"PREVIEW ({estado['estilo_revit'].upper()}): {cfg_p['titulo']}\n"
                 "Clique em [RENDER FINAL] para gerar o Ray Casting desta vista",
-                fontsize=9.5, color='#0F172A'
+                fontsize=9.2, color='#0F172A'
             )
             fig.canvas.draw_idle()
         return callback
@@ -1367,19 +1582,22 @@ def iniciar_aplicacao():
     for label, chave, rect, cor_b in botoes_topo:
         ax_b = fig.add_axes(rect)
         btn = Button(ax_b, label, color=cor_b)
+        btn.label.set_fontsize(8.8)
         if chave in ('wireframe', 'shaded', 'materiais'):
             btn.on_clicked(alternar_estilo_revit(chave))
         elif chave == 'cam_manual':
             btn.on_clicked(lambda _e: mostrar_painel(not estado['modo_painel']))
+        elif chave == 'dia_noite':
+            btn.on_clicked(alternar_dia_noite)
         elif chave == 'render_now':
             btn.on_clicked(executar_render_final)
-        botoes_refs.append(btn)
+        botoes_refs[chave] = btn
 
     for label, chave, rect in botoes_base:
         ax_b = fig.add_axes(rect)
         btn = Button(ax_b, label)
         btn.on_clicked(selecionar_preset_leve(chave))
-        botoes_refs.append(btn)
+        botoes_refs[chave] = btn
 
     plt.show()
 
