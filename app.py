@@ -1,9 +1,9 @@
 import streamlit as st
 import numpy as np
-from motor_ct import RenderizadorCT  # Seu arquivo atual com RenderizadorCT
+from motor_ct import RenderizadorCT
 
-st.set_page_config(page_title="Bloco 734 CT + Escultura Cinética", layout="wide")
-st.title("Visualizador 3D & Ray Casting — Bloco 734 (CT) e Escultura Cinética")
+st.set_page_config(page_title="Bloco 734 CT + Escultura Cinética + Cáusticas", layout="wide")
+st.title("Visualizador 3D & Ray Casting — Bloco 734 (CT), Escultura Cinética e Fonte")
 
 @st.cache_resource
 def carregar_motor():
@@ -11,16 +11,21 @@ def carregar_motor():
 
 renderer = carregar_motor()
 
-# Barra lateral com os mesmos presets e controles manuais
+# --- CONTROLE GLOBAL DIA / NOITE NA BARRA LATERAL ---
+st.sidebar.header("Iluminação Global")
+ciclo_noite = st.sidebar.toggle("Modo Noturno (Postes + Spots Submersos + Cáusticas)", value=False)
+st.sidebar.caption("À noite, a luz solar é desligada e os spots da fonte projetam cáusticas na fachada do Bloco 734.")
+
+st.sidebar.divider()
 st.sidebar.header("Controles de Câmera")
 modo = st.sidebar.radio("Modo de Câmera:", ["Presets da Cena", "Órbita Abóbada (0° a 90°)", "Câmera Manual"])
 
 if modo == "Presets da Cena":
     opcoes = {
         "2 Pontos de Fuga (Principal)": "2_pontos_fuga",
-        "1 Ponto de Fuga (Frontal)": "1_ponto_fuga",
+        "1 Ponto de Fuga (Frontal Fonte e Fachada)": "1_ponto_fuga",
         "3 Pontos de Fuga (Aérea)": "3_pontos_fuga",
-        "Zoom In (Escultura 5 Losangos)": "zoom_in",
+        "Zoom In (Escultura 5 Losangos + Fonte)": "zoom_in",
         "Zoom Out (Campo Ampliado)": "zoom_out",
         "Projeção Ortográfica": "ortografica",
         "Projeção Oblíqua": "obliqua",
@@ -59,16 +64,14 @@ else:
         'd': d_val, 'win': (-1.02, 1.02, -1.02, 1.02), 'proj': 'perspectiva'
     }
 
-if st.sidebar.button("RENDERIZAR RAY CASTING", type="primary"):
-    with st.spinner("Calculando Ray Casting (AABB, Texturas, Sombras e 4 Luzes)..."):
-        img, titulo = renderer.renderizar_config(cfg)
+# Dispara nova renderização ao clicar no botão ou ao alternar Dia/Noite
+chave_estado = (str(cfg), ciclo_noite)
+if st.sidebar.button("RENDERIZAR RAY CASTING", type="primary") or st.session_state.get('ultima_chave') != chave_estado:
+    with st.spinner("Calculando Ray Casting (AABB, Texturas, Sombras e Cáusticas)..."):
+        img, titulo = renderer.renderizar_config(cfg, modo_noite=ciclo_noite)
         st.session_state['ultima_img'] = img
         st.session_state['ultimo_titulo'] = titulo
-
-if 'ultima_img' not in st.session_state:
-    img, titulo = renderer.renderizar_config(cfg)
-    st.session_state['ultima_img'] = img
-    st.session_state['ultimo_titulo'] = titulo
+        st.session_state['ultima_chave'] = chave_estado
 
 st.subheader(st.session_state['ultimo_titulo'])
 st.image(st.session_state['ultima_img'], use_container_width=False, width=650)
