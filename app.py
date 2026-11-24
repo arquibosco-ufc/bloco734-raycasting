@@ -370,6 +370,3 @@ else:
                 f"**Material:** `{mat_nome}` | "
                 f"**Mundo (X, Y, Z):** `({pw[0]:.2f} m, {pw[1]:.2f} m, {pw[2]:.2f} m)`"
             )
-            f"**Material:** `{mat_nome}` | "
-            f"**Mundo (X, Y, Z):** `({pw[0]:.2f} m, {pw[1]:.2f} m, {pw[2]:.2f} m)`"
-        )
