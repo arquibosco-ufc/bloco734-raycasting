@@ -7,7 +7,10 @@ from motor_ct import RenderizadorCT
 
 st.set_page_config(page_title="Bloco 734 CT + Escultura Cinética + Cáusticas", layout="wide")
 st.title("Visualizador 3D & Ray Casting — Bloco 734 (CT), Escultura Cinética e Fonte")
-
+motor_teste = carregar_motor(360)
+st.sidebar.info(
+    f"Malhas na cena: {[p.nome for p in motor_teste.cena if p.tipo == 'malha']}"
+)
 @st.cache_resource
 def carregar_motor(resolucao=360):
     return RenderizadorCT(largura=resolucao, altura=resolucao)
