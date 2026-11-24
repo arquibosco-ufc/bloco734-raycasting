@@ -4,6 +4,7 @@ from matplotlib.backend_bases import ResizeEvent
 from matplotlib.widgets import Button, TextBox
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import time
+import os
 
 if not hasattr(ResizeEvent, 'inaxes'):
     ResizeEvent.inaxes = None
@@ -856,7 +857,35 @@ def montar_cenario():
         cena.append(Primitiva(f"Poste Iluminação {idx_p}", "cilindro", M_poste, mat_esquadria))
         M_lum = mat_translacao(px_pos + off_lum_x, 6.3, pz_pos + 0.4) @ mat_escala(0.35, 0.24, 0.35)
         cena.append(Primitiva(f"Luminária Poste {idx_p}", "esfera", M_lum, mat_alvenaria_branca))
+# --- ELEMENTOS 3D EXTERNOS (.OBJ LOW-POLY) ---
+    mat_suv       = Material("SUV Urbano (Pintura Prata)", (0.72, 0.75, 0.78), (0.80, 0.82, 0.85), (0.60, 0.62, 0.65), brilho=90.0, refletividade=0.25)
+    mat_esportivo = Material("Carro Esportivo (Vermelho)", (0.82, 0.12, 0.14), (0.85, 0.85, 0.88), (0.68, 0.10, 0.12), brilho=100.0, refletividade=0.28)
+    mat_estudante1= Material("Estudante 1 (Casual)", (0.18, 0.42, 0.72), (0.20, 0.20, 0.22), (0.15, 0.35, 0.60), brilho=20.0)
+    mat_estudante2= Material("Estudante 2 (Vestido)", (0.78, 0.48, 0.22), (0.20, 0.20, 0.22), (0.65, 0.40, 0.18), brilho=20.0)
+    mat_palmeira  = Material("Palmeira Tropical (OBJ)", (0.14, 0.46, 0.18), (0.15, 0.20, 0.15), (0.12, 0.38, 0.15), brilho=16.0)
 
+    # 1. Carros na via asfáltica (Y = 0.10m)
+    M_suv = mat_translacao(23.0, 0.10, 7.2) @ mat_rotacao_y(np.deg2rad(90.0)) @ mat_escala(1.65, 1.65, 1.65)
+    cena.append(Primitiva("SUV na Via CT (OBJ)", "malha", M_suv, mat_suv,
+                          dados_extra=carregar_malha_obj("SUV.obj", M_suv)))
+
+    M_sport = mat_translacao(39.0, 0.10, 10.6) @ mat_rotacao_y(np.deg2rad(-90.0)) @ mat_escala(1.32, 1.32, 1.32)
+    cena.append(Primitiva("Carro Esportivo Via CT (OBJ)", "malha", M_sport, mat_esportivo,
+                          dados_extra=carregar_malha_obj("SportsCar.obj", M_sport)))
+
+    # 2. Grupo de estudantes na calçada (Y = 0.20m) junto à fonte e escultura
+    M_p1 = mat_translacao(18.6, 0.20, 18.8) @ mat_rotacao_y(np.deg2rad(-35.0)) @ mat_escala(1.68, 1.68, 1.68)
+    cena.append(Primitiva("Estudante Casual (OBJ)", "malha", M_p1, mat_estudante1,
+                          dados_extra=carregar_malha_obj("Female_Casual.obj", M_p1)))
+
+    M_p2 = mat_translacao(19.4, 0.20, 18.3) @ mat_rotacao_y(np.deg2rad(-55.0)) @ mat_escala(1.65, 1.65, 1.65)
+    cena.append(Primitiva("Estudante Vestido (OBJ)", "malha", M_p2, mat_estudante2,
+                          dados_extra=carregar_malha_obj("Female_Dress.obj", M_p2)))
+
+    # 3. Palmeira na praça (Y = 0.20m)
+    M_palm = mat_translacao(42.5, 0.20, 17.5) @ mat_escala(4.8, 4.8, 4.8)
+    cena.append(Primitiva("Palmeira Praça CT (OBJ)", "malha", M_palm, mat_palmeira,
+                          dados_extra=carregar_malha_obj("PalmTree_2.obj", M_palm)))
     extras_3d = {
         'arvores': arvores_3d_info,
         'postes': postes_coords,
