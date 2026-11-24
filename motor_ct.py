@@ -329,6 +329,13 @@ def carregar_malha_obj(caminho_obj, M_inst):
   caminho_completo = os.path.join(
       os.path.dirname(os.path.abspath(__file__)), caminho_obj
   )
+  if not os.path.exists(caminho_completo):
+    print(f'[AVISO] Arquivo não encontrado: {caminho_completo}')
+    return {
+        'vertices_world': np.zeros((0, 3)),
+        'faces': np.zeros((0, 3), dtype=int),
+    }
+
   vertices = []
   faces = []
   with open(caminho_completo, 'r', encoding='utf-8', errors='ignore') as arq:
@@ -342,17 +349,21 @@ def carregar_malha_obj(caminho_obj, M_inst):
         idxs = []
         for p in partes[1:]:
           idx_raw = int(p.split('/')[0])
-          # Suporta tanto índices positivos (base 1) quanto negativos no formato .obj
           idxs.append(idx_raw - 1 if idx_raw > 0 else len(vertices) + idx_raw)
         for k in range(1, len(idxs) - 1):
           faces.append([idxs[0], idxs[k], idxs[k + 1]])
+
+  if not vertices or not faces:
+    return {
+        'vertices_world': np.zeros((0, 3)),
+        'faces': np.zeros((0, 3), dtype=int),
+    }
 
   v_loc = np.array(vertices, dtype=np.float64)
   v_min, v_max = v_loc.min(axis=0), v_loc.max(axis=0)
   extensoes = v_max - v_min
   centro_xz = 0.5 * (v_min + v_max)
 
-  # Normaliza pela MAIOR dimensão (comprimento nos carros, altura nas pessoas/árvores)
   escala_norm = 1.0 / max(np.max(extensoes), 1e-6)
   v_loc[:, 0] = (v_loc[:, 0] - centro_xz[0]) * escala_norm
   v_loc[:, 1] = (v_loc[:, 1] - v_min[1]) * escala_norm
