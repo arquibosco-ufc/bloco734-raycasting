@@ -266,7 +266,26 @@ def gerar_figura_webgl_leve(renderer, cfg_cam, modo_noite, estilo):
             marker=dict(size=7, symbol='diamond', color='#EA580C'),
             name=f"Cone {idx_c}", hovertext=f"PICK: Cone Sinalização {idx_c}", hoverinfo="text+x+y+z"
         ))
-
+# 6. Malhas .OBJ externas carregadas na cena
+    cores_obj = {
+        "SUV na Via CT (OBJ)": "#CBD5E1",
+        "Carro Esportivo Via CT (OBJ)": "#DC2626",
+        "Estudante Casual (OBJ)": "#2563EB",
+        "Estudante Vestido (OBJ)": "#D97706",
+        "Palmeira Praça CT (OBJ)": "#15803D",
+    }
+    for prim in renderer.cena:
+        if prim.tipo == "malha" and prim.nome in cores_obj:
+            vw = prim.dados['vertices_world']
+            fc = prim.dados['faces']
+            fig.add_trace(go.Mesh3d(
+                x=vw[:, 0], y=vw[:, 2], z=vw[:, 1],
+                i=fc[:, 0], j=fc[:, 1], k=fc[:, 2],
+                color=cores_obj[prim.nome], flatshading=True,
+                name=prim.nome,
+                hovertext=f"PICK: {prim.nome} | Material: {prim.mat.nome}",
+                hoverinfo="text+x+y+z"
+            ))
     # Conversão exata de Eye e At da câmera para o Preview WebGL
     eye = np.array(cfg_cam['eye'], dtype=np.float64)
     at = np.array(cfg_cam['at'], dtype=np.float64)
