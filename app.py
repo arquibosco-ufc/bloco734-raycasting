@@ -1050,6 +1050,31 @@ def montar_cenario():
   }
 
   cena = []
+  for prim in renderer.cena:
+      if prim.tipo == "malha" and prim.nome in cores_obj:
+        vw = prim.dados["vertices_world"]
+        fc = prim.dados["faces"]
+        if len(vw) == 0 or len(fc) == 0:
+          continue
+        # Se o .OBJ tiver mais de 4000 triângulos, amostra para não travar o WebGL
+        if len(fc) > 4000:
+          passo = max(1, len(fc) // 4000)
+          fc = fc[::passo]
+        fig.add_trace(
+            go.Mesh3d(
+                x=vw[:, 0],
+                y=vw[:, 2],
+                z=vw[:, 1],
+                i=fc[:, 0],
+                j=fc[:, 1],
+                k=fc[:, 2],
+                color=cores_obj[prim.nome],
+                flatshading=True,
+                name=prim.nome,
+                hovertext=f"PICK: {prim.nome} | Material: {prim.mat.nome}",
+                hoverinfo="text+x+y+z",
+            )
+        )
 
   M_via = mat_translacao(35.0, 0.05, 9.0) @ mat_escala(66.0, 0.10, 14.0)
   cena.append(Primitiva('Via Asfáltica CT', 'cubo', M_via, mat_asfalto))
