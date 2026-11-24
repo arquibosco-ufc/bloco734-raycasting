@@ -324,7 +324,34 @@ def criar_malha_cobertura_metalica(M_inst):
         [3, 0, 4], [3, 4, 7],
     ], dtype=int)
     return {'vertices_world': v_world, 'faces': faces}
+def carregar_malha_obj(caminho_obj, M_inst):
+    vertices = []
+    faces = []
+    with open(caminho_obj, 'r', encoding='utf-8', errors='ignore') as arq:
+        for linha in arq:
+            partes = linha.strip().split()
+            if not partes:
+                continue
+            if partes[0] == 'v':
+                vertices.append([float(partes[1]), float(partes[2]), float(partes[3])])
+            elif partes[0] == 'f':
+                # Converte polígonos de 3 ou 4 lados em triângulos (índices base 0)
+                idxs = [int(p.split('/')[0]) - 1 for p in partes[1:]]
+                for k in range(1, len(idxs) - 1):
+                    faces.append([idxs[0], idxs[k], idxs[k + 1]])
 
+    v_loc = np.array(vertices, dtype=np.float64)
+    # Normaliza para altura = 1.0m e base apoiada em Y = 0
+    v_min, v_max = v_loc.min(axis=0), v_loc.max(axis=0)
+    centro_xz = 0.5 * (v_min + v_max)
+    escala_norm = 1.0 / max(v_max[1] - v_min[1], 1e-6)
+    v_loc[:, 0] = (v_loc[:, 0] - centro_xz[0]) * escala_norm
+    v_loc[:, 1] = (v_loc[:, 1] - v_min[1]) * escala_norm
+    v_loc[:, 2] = (v_loc[:, 2] - centro_xz[2]) * escala_norm
+
+    v_h = np.hstack([v_loc, np.ones((len(v_loc), 1))])
+    v_world = (M_inst @ v_h.T).T[:, :3]
+    return {'vertices_world': v_world, 'faces': np.array(faces, dtype=int)}
 # ==============================================================================
 # 3B. MODELO PARAMÉTRICO: ESCULTURA CINÉTICA EM AÇO (5 LOSANGOS ROTACIONADOS A 45°)
 # ==============================================================================
