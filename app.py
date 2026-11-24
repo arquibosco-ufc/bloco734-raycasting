@@ -1,5 +1,7 @@
 import streamlit as st
 import numpy as np
+from PIL import Image
+from streamlit_image_coordinates import streamlit_image_coordinates
 from motor_ct import RenderizadorCT
 
 st.set_page_config(page_title="Bloco 734 CT + Escultura Cinética + Cáusticas", layout="wide")
@@ -11,7 +13,7 @@ def carregar_motor():
 
 renderer = carregar_motor()
 
-# --- CONTROLE GLOBAL DIA / NOITE NA BARRA LATERAL ---
+# --- CONTROLE GLOBAL DIA / NOITE ---
 st.sidebar.header("Iluminação Global")
 ciclo_noite = st.sidebar.toggle("Modo Noturno (Postes + Spots Submersos + Cáusticas)", value=False)
 st.sidebar.caption("À noite, a luz solar é desligada e os spots da fonte projetam cáusticas na fachada do Bloco 734.")
@@ -64,7 +66,7 @@ else:
         'd': d_val, 'win': (-1.02, 1.02, -1.02, 1.02), 'proj': 'perspectiva'
     }
 
-# Dispara nova renderização ao clicar no botão ou ao alternar Dia/Noite
+# Renderiza apenas quando mudar a câmera ou o botão Dia/Noite (mantém o buffer de picking salvo)
 chave_estado = (str(cfg), ciclo_noite)
 if st.sidebar.button("RENDERIZAR RAY CASTING", type="primary") or st.session_state.get('ultima_chave') != chave_estado:
     with st.spinner("Calculando Ray Casting (AABB, Texturas, Sombras e Cáusticas)..."):
@@ -72,6 +74,40 @@ if st.sidebar.button("RENDERIZAR RAY CASTING", type="primary") or st.session_sta
         st.session_state['ultima_img'] = img
         st.session_state['ultimo_titulo'] = titulo
         st.session_state['ultima_chave'] = chave_estado
+        st.session_state['pick_buffer'] = renderer.ultimo_buffer_pick
 
 st.subheader(st.session_state['ultimo_titulo'])
-st.image(st.session_state['ultima_img'], use_container_width=False, width=650)
+st.caption("Clique com o mouse ou toque com o dedo sobre qualquer elemento da imagem para executar o **Picking** (Objeto, Material e Coordenada 3D).")
+
+# Converte o array float [0..1] para imagem PIL clicável/tocável
+img_uint8 = (np.clip(st.session_state['ultima_img'], 0.0, 1.0) * 255).astype(np.uint8)
+pil_img = Image.fromarray(img_uint8)
+
+# Exibe a imagem interativa que captura clique do mouse e toque na tela
+largura_exibicao = 580
+coords = streamlit_image_coordinates(pil_img, width=largura_exibicao, key="viewport_picking")
+
+# Processa o Picking quando o usuário clica ou toca na imagem
+buf = st.session_state.get('pick_buffer')
+if coords is not None and buf is not None:
+    escala_x = renderer.W / float(largura_exibicao)
+    escala_y = renderer.H / float(largura_exibicao)
+    px = int(np.clip(coords["x"] * escala_x, 0, renderer.W - 1))
+    py = int(np.clip(coords["y"] * escala_y, 0, renderer.H - 1))
+
+    oid = buf['obj_idx'][py, px]
+    if oid < 0:
+        st.info(f"**PICK ({px}, {py}):** Céu / Fundo")
+    else:
+        prim = renderer.cena[oid]
+        pw = buf['P_world'][py, px]
+        if prim.tipo == 'bloco_ct_arqueado':
+            mat_nome = renderer.materiais_bloco[buf['sub_mat'][py, px]].nome
+        else:
+            mat_nome = prim.mat.nome
+
+        st.success(
+            f"**PICK ({px}, {py})** — **Objeto:** `{prim.nome}` | "
+            f"**Material:** `{mat_nome}` | "
+            f"**Mundo (X, Y, Z):** `({pw[0]:.2f} m, {pw[1]:.2f} m, {pw[2]:.2f} m)`"
+        )
