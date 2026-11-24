@@ -326,6 +326,7 @@ def criar_malha_cobertura_metalica(M_inst):
     ], dtype=int)
     return {'vertices_world': v_world, 'faces': faces}
 def carregar_malha_obj(caminho_obj, M_inst):
+    caminho_completo = os.path.join(os.path.dirname(os.path.abspath(__file__)), caminho_obj)
     vertices = []
     faces = []
     with open(caminho_obj, 'r', encoding='utf-8', errors='ignore') as arq:
