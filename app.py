@@ -52,16 +52,41 @@ elif modo == "Órbita Abóbada (0° a 90°)":
     }
 
 else:
+    posicoes_camera = {
+        "Personalizado (digitar Eye X, Y, Z)": None,
+        "Origem do Mundo (0.0, 0.0, 0.0)": (0.0, 0.0, 0.0),
+        "Origem Nível do Olhar (0.0, 1.7, 0.0)": (0.0, 1.7, 0.0),
+        "Padrão Frontal-Esquerda (6.5, 3.4, 5.5)": (6.5, 3.4, 5.5),
+        "Frente ao Espelho d'Água (20.0, 3.2, 11.0)": (20.0, 3.2, 11.0),
+        "Vista Aérea Elevada (7.5, 18.0, 6.0)": (7.5, 18.0, 6.0),
+    }
+    alvos_rapidos = {
+        "Personalizado (digitar At X, Y, Z)": None,
+        "Centro do Conjunto (28.0, 2.8, 28.0)": (28.0, 2.8, 28.0),
+        "Bloco 734 (Fachada Curva / Placa)": (22.0, 3.5, 24.0),
+        "Escultura Cinética (5 Losangos)": (15.0, 2.2, 22.0),
+        "Espelho d'Água (Fonte e Cáusticas)": (27.0, 0.5, 19.8),
+        "Abrigo Metálico (Malha)": (46.5, 1.5, 18.8),
+        "Cones de Sinalização": (35.5, 0.6, 16.0),
+    }
+
+    pos_escolhida = st.sidebar.selectbox("Atalho de Posição (Eye):", list(posicoes_camera.keys()))
+    alvo_escolhido = st.sidebar.selectbox("Atalho de Alvo (At):", list(alvos_rapidos.keys()))
+
+    coords_eye = posicoes_camera[pos_escolhida]
+    coords_alvo = alvos_rapidos[alvo_escolhido]
+
     col1, col2, col3 = st.sidebar.columns(3)
-    ex = col1.number_input("Eye X", value=6.5)
-    ey = col2.number_input("Eye Y", value=3.4)
-    ez = col3.number_input("Eye Z", value=5.5)
-    ax = col1.number_input("At X", value=28.0)
-    ay = col2.number_input("At Y", value=2.8)
-    az_at = col3.number_input("At Z", value=28.0)
+    ex = col1.number_input("Eye X", value=coords_eye[0] if coords_eye else 6.5)
+    ey = col2.number_input("Eye Y", value=coords_eye[1] if coords_eye else 3.4)
+    ez = col3.number_input("Eye Z", value=coords_eye[2] if coords_eye else 5.5)
+    ax = col1.number_input("At X", value=coords_alvo[0] if coords_alvo else 28.0)
+    ay = col2.number_input("At Y", value=coords_alvo[1] if coords_alvo else 2.8)
+    az_at = col3.number_input("At Z", value=coords_alvo[2] if coords_alvo else 28.0)
     d_val = st.sidebar.number_input("Distância Focal (d)", value=1.5)
+
     cfg = {
-        'titulo': f'Câmera Manual Eye=({ex}, {ey}, {ez})',
+        'titulo': f'Câmera Manual Eye=({ex}, {ey}, {ez}) -> At=({ax}, {ay}, {az_at})',
         'eye': [ex, ey, ez], 'at': [ax, ay, az_at], 'up': [0.0, 1.0, 0.0],
         'd': d_val, 'win': (-1.02, 1.02, -1.02, 1.02), 'proj': 'perspectiva'
     }
