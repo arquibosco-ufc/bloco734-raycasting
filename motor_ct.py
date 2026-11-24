@@ -326,34 +326,41 @@ def criar_malha_cobertura_metalica(M_inst):
     ], dtype=int)
     return {'vertices_world': v_world, 'faces': faces}
 def carregar_malha_obj(caminho_obj, M_inst):
-    caminho_completo = os.path.join(os.path.dirname(os.path.abspath(__file__)), caminho_obj)
-    vertices = []
-    faces = []
-    with open(caminho_obj, 'r', encoding='utf-8', errors='ignore') as arq:
-        for linha in arq:
-            partes = linha.strip().split()
-            if not partes:
-                continue
-            if partes[0] == 'v':
-                vertices.append([float(partes[1]), float(partes[2]), float(partes[3])])
-            elif partes[0] == 'f':
-                # Converte polígonos de 3 ou 4 lados em triângulos (índices base 0)
-                idxs = [int(p.split('/')[0]) - 1 for p in partes[1:]]
-                for k in range(1, len(idxs) - 1):
-                    faces.append([idxs[0], idxs[k], idxs[k + 1]])
+  caminho_completo = os.path.join(
+      os.path.dirname(os.path.abspath(__file__)), caminho_obj
+  )
+  vertices = []
+  faces = []
+  with open(caminho_completo, 'r', encoding='utf-8', errors='ignore') as arq:
+    for linha in arq:
+      partes = linha.strip().split()
+      if not partes:
+        continue
+      if partes[0] == 'v':
+        vertices.append([float(partes[1]), float(partes[2]), float(partes[3])])
+      elif partes[0] == 'f':
+        idxs = []
+        for p in partes[1:]:
+          idx_raw = int(p.split('/')[0])
+          # Suporta tanto índices positivos (base 1) quanto negativos no formato .obj
+          idxs.append(idx_raw - 1 if idx_raw > 0 else len(vertices) + idx_raw)
+        for k in range(1, len(idxs) - 1):
+          faces.append([idxs[0], idxs[k], idxs[k + 1]])
 
-    v_loc = np.array(vertices, dtype=np.float64)
-    # Normaliza para altura = 1.0m e base apoiada em Y = 0
-    v_min, v_max = v_loc.min(axis=0), v_loc.max(axis=0)
-    centro_xz = 0.5 * (v_min + v_max)
-    escala_norm = 1.0 / max(v_max[1] - v_min[1], 1e-6)
-    v_loc[:, 0] = (v_loc[:, 0] - centro_xz[0]) * escala_norm
-    v_loc[:, 1] = (v_loc[:, 1] - v_min[1]) * escala_norm
-    v_loc[:, 2] = (v_loc[:, 2] - centro_xz[2]) * escala_norm
+  v_loc = np.array(vertices, dtype=np.float64)
+  v_min, v_max = v_loc.min(axis=0), v_loc.max(axis=0)
+  extensoes = v_max - v_min
+  centro_xz = 0.5 * (v_min + v_max)
 
-    v_h = np.hstack([v_loc, np.ones((len(v_loc), 1))])
-    v_world = (M_inst @ v_h.T).T[:, :3]
-    return {'vertices_world': v_world, 'faces': np.array(faces, dtype=int)}
+  # Normaliza pela MAIOR dimensão (comprimento nos carros, altura nas pessoas/árvores)
+  escala_norm = 1.0 / max(np.max(extensoes), 1e-6)
+  v_loc[:, 0] = (v_loc[:, 0] - centro_xz[0]) * escala_norm
+  v_loc[:, 1] = (v_loc[:, 1] - v_min[1]) * escala_norm
+  v_loc[:, 2] = (v_loc[:, 2] - centro_xz[2]) * escala_norm
+
+  v_h = np.hstack([v_loc, np.ones((len(v_loc), 1))])
+  v_world = (M_inst @ v_h.T).T[:, :3]
+  return {'vertices_world': v_world, 'faces': np.array(faces, dtype=int)}
 # ==============================================================================
 # 3B. MODELO PARAMÉTRICO: ESCULTURA CINÉTICA EM AÇO (5 LOSANGOS ROTACIONADOS A 45°)
 # ==============================================================================
@@ -866,11 +873,11 @@ def montar_cenario():
     mat_palmeira  = Material("Palmeira Tropical (OBJ)", (0.14, 0.46, 0.18), (0.15, 0.20, 0.15), (0.12, 0.38, 0.15), brilho=16.0)
 
     # 1. Carros na via asfáltica (Y = 0.10m)
-    M_suv = mat_translacao(23.0, 0.10, 7.2) @ mat_rotacao_y(np.deg2rad(90.0)) @ mat_escala(1.65, 1.65, 1.65)
+    M_suv = mat_translacao(23.0, 0.10, 7.2) @ mat_rotacao_y(np.deg2rad(90.0)) @ mat_escala(4.5, 4.5, 4.5)
     cena.append(Primitiva("SUV na Via CT (OBJ)", "malha", M_suv, mat_suv,
                           dados_extra=carregar_malha_obj("SUV.obj", M_suv)))
 
-    M_sport = mat_translacao(39.0, 0.10, 10.6) @ mat_rotacao_y(np.deg2rad(-90.0)) @ mat_escala(1.32, 1.32, 1.32)
+    M_sport = mat_translacao(39.0, 0.10, 10.6) @ mat_rotacao_y(np.deg2rad(-90.0)) @ mat_escala(4.3, 4.3, 4.3)
     cena.append(Primitiva("Carro Esportivo Via CT (OBJ)", "malha", M_sport, mat_esportivo,
                           dados_extra=carregar_malha_obj("SportsCar.obj", M_sport)))
 
@@ -884,7 +891,7 @@ def montar_cenario():
                           dados_extra=carregar_malha_obj("Female_Dress.obj", M_p2)))
 
     # 3. Palmeira na praça (Y = 0.20m)
-    M_palm = mat_translacao(42.5, 0.20, 17.5) @ mat_escala(4.8, 4.8, 4.8)
+    M_palm = mat_translacao(42.5, 0.20, 17.5) @ mat_escala(5.5, 5.5, 5.5)
     cena.append(Primitiva("Palmeira Praça CT (OBJ)", "malha", M_palm, mat_palmeira,
                           dados_extra=carregar_malha_obj("PalmTree_2.obj", M_palm)))
     extras_3d = {
