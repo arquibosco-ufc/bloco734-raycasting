@@ -285,6 +285,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   .action-btn.dance { border-color: #ec4899; color: #f9a8d4; }
   .action-btn.photo { border-color: #34d399; color: #6ee7b7; }
   .action-btn.creto { border-color: #a78bfa; color: #ddd6fe; }
+  .action-btn.lantern { border-color: #fde047; color: #fef08a; }
 
   /* CARTÃO DE REALIDADE AUMENTADA */
   #ar-card {
@@ -459,7 +460,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   @media (pointer: coarse), (max-width: 900px) {
     #touch-controls { display: flex; }
   }
-  .action-btn.lantern { border-color: #fde047; color: #fef08a; }
 </style>
 </head>
 <body>
@@ -661,10 +661,10 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
           <h4>🎮 Controles Unificados</h4>
           <p>• <b>W A S D / Setas:</b> Caminhar (encoste na <b>Escada Lateral X=59.35, Z=24</b> e segure <b>W</b> para subir direto ao telhado!).<br/>
              • <b>Arrastar Mouse / Roda:</b> Girar câmera 360° e aplicar Zoom.<br/>
-             • <b>[E] Interagir:</b> Coleta itens das mesas, fala com <b>Prof. Creto</b> (placa flutuante na praça), toma café na ilha (X=35.8, Z=18.8), aciona Totens 3D ou inspeciona monumentos.<br/>
+             • <b>[E] Interagir:</b> Coleta itens das mesas, fala com <b>Prof. Creto</b> (placa flutuante na área lateral X=9.5, Z=22.2), toma café na ilha (X=35.8, Z=18.8), aciona Totens 3D ou inspeciona monumentos.<br/>
              • <b>[R] Escalar Árvore/Poste:</b> Sobe em árvores ou postes de iluminação (equilibre com <b>A/D</b> e solte com <b>R</b> ou <b>Espaço</b>).<br/>
              • <b>[P] Modo Foto:</b> Abre o visor e registra fotos técnicas (Painéis Solares, Pássaro CT, Escultura, etc.).<br/>
-             • <b>Falar com Prof. Creto:</b> Vá até o personagem Prof. Creto na praça (X=31.5, Z=23.5) e pressione <b>[E]</b> ou clique nele para abrir o quiz.<br/>
+             • <b>Falar com Prof. Creto:</b> Vá até o personagem Prof. Creto na área lateral (X=9.5, Z=22.2) e pressione <b>[E]</b> ou clique nele para abrir o quiz.<br/>
              • <b>[F] Atacar:</b> Quebra as janelas curvas do Bloco 734.<br/>
              • <b>[C] Comemorar:</b> Executa dança comemorativa.<br/>
              • <b>[Q] Inventário & Quests:</b> Pausa o jogo e exibe progresso.</p>
@@ -680,6 +680,8 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   const MODO_NOITE = __MODO_NOITE__;
   let sunEnabled = __ATIVAR_SOL__;
   let spotsEnabled = __ATIVAR_SPOTS__;
+  let lanternEnabled = MODO_NOITE;
+  let isDragging = false, lastMX = 0, lastMY = 0;
 
   const wrapper = document.getElementById('game-wrapper');
   const canvas = document.getElementById('c');
@@ -932,7 +934,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   for (let zf = 2.2; zf <= 12.2; zf += 1.15) {
     addBox(3.2, 0.02, 0.56, matFaixaBranca, 27.0, 0.11, zf, 0, false);
   }
-  // Calçada principal ampla (z de 13.0 até 61.0 -> centro Z=37.0, profundidade 48) + aba frontal até Z=12.8
   addBox(68, 0.2, 48, matCalcada, 35, 0.10, 37.0, 0, false);
   addBox(68, 0.2, 4.0, matCalcada, 35, 0.10, 14.5, 0, false);
 
@@ -1132,7 +1133,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   placaEscada.position.set(59.6, 2.6, 24.0);
   scene.add(placaEscada);
 
-  // Árvores Escaláveis ([R]) + Coruja do Jumpscare + Arbustos Leves (Sem sobrecarga)
+  // Árvores Escaláveis ([R]) + Coruja do Jumpscare + Arbustos Leves
   const arvoresCoords = [
     { nome: "Árvore Bosque Esq.", x: 8.5, z: 25.0, h: 4.5, esc: 1.15, temCoruja: false },
     { nome: "Árvore Sombria (Coruja)", x: 11.5, z: 38.0, h: 4.9, esc: 1.25, temCoruja: true },
@@ -1168,7 +1169,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     registrarAR(arv.nome, "ESCALÁVEL [R] • REFÚGIO CONTRA VIGILANTES", "Pressione [R] próximo ao tronco para escalar usando W/S e equilibrando com A/D!", "Cilindro + Esferas (Quatérnios)", [arv.x, 2.8 * arv.esc, arv.z], [3.4 * arv.esc, 5.4 * arv.esc, 3.4 * arv.esc]);
   });
 
-  // Arbustos decorativos na área lateral e calçada ampla (geometria leve compartilhada)
   const arbustosPos = [
     [6.5, 21.5, 0.95], [9.8, 21.2, 0.80], [7.2, 28.8, 1.05], [10.2, 34.5, 0.90],
     [13.5, 15.2, 0.85], [17.8, 15.0, 0.78], [39.5, 15.4, 0.85], [51.5, 15.6, 0.95]
@@ -1227,7 +1227,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   // ============================================================================
   // 5. PÁSSARO ANIMADO, CARROS, AVATARES, PROF. CRETO, VIGILANTES & CÃO OCULTO
   // ============================================================================
-  // Pássaro do Campus CT (Restaurado!)
   const birdGroup = new THREE.Group();
   const matPassaroCorpo = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.4 });
   const matPassaroPeito = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.5 });
@@ -1256,7 +1255,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   birdGroup.position.set(30.0, 9.2, 22.0);
   scene.add(birdGroup);
 
-  // Carros Animados
   const animatedCars = [];
   function criarVeiculoAnimado(nome, xInit, zLane, dirX, speed, corHex) {
     const grp = new THREE.Group();
@@ -1293,7 +1291,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   criarVeiculoAnimado("SUV Prata na Via CT", 12.0, 5.6, 1, 8.5, 0xcbd5e1);
   criarVeiculoAnimado("Carro Esportivo Vermelho", 58.0, 8.6, -1, 11.5, 0xdc2626);
 
-  // Avatar Articulado Estilo Roblox
   function criarAvatarRoblox(x, y, z, rotDeg, corTorso, corCabeca, corCalca, esc = 1.0) {
     const grp = new THREE.Group();
     grp.position.set(x, y, z);
@@ -1315,10 +1312,308 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     return { grp, bE, bD, pE, pD, torso, cab };
   }
 
-  // Alunos na Praça com Ações & Dicas (2ª vez na cadeira vs Estudando muito para passar)
+  // Sistema de Notificações Limpo (Sem Spam — máximo 2 banners e cooldown por canal)
+  const alertStack = document.getElementById('alert-stack');
+  const activeChannelBanners = {};
+  const channelCooldowns = {};
+
+  function mostrarAlerta(texto, classe = 'alert-info', duracao = 2500, channel = 'general') {
+    const now = performance.now();
+    if (activeChannelBanners[channel] && activeChannelBanners[channel].el.parentNode) {
+      activeChannelBanners[channel].el.textContent = texto;
+      activeChannelBanners[channel].el.className = 'alert-banner ' + classe;
+      clearTimeout(activeChannelBanners[channel].timer);
+      activeChannelBanners[channel].timer = setTimeout(() => {
+        if (activeChannelBanners[channel] && activeChannelBanners[channel].el.parentNode) {
+          activeChannelBanners[channel].el.remove();
+        }
+        delete activeChannelBanners[channel];
+      }, duracao);
+      return;
+    }
+
+    if (channelCooldowns[channel] && now < channelCooldowns[channel]) return;
+    channelCooldowns[channel] = now + 3400;
+
+    while (alertStack.children.length >= 2) {
+      alertStack.firstChild.remove();
+    }
+
+    const div = document.createElement('div');
+    div.className = 'alert-banner ' + classe;
+    div.textContent = texto;
+    alertStack.appendChild(div);
+
+    const timer = setTimeout(() => {
+      if (div.parentNode) div.remove();
+      delete activeChannelBanners[channel];
+    }, duracao);
+    activeChannelBanners[channel] = { el: div, timer };
+  }
+
+  // Quiz Prof. Creto
+  const bancoPerguntasCreto = [
+    {
+      q: "No ciclo trigonométrico usado em rotações 2D/3D, quais são os sinais de sin(θ) e cos(θ) no 2º Quadrante (90° < θ < 180°)?",
+      opts: [
+        "sin(θ) > 0 (positivo) e cos(θ) < 0 (negativo)",
+        "sin(θ) < 0 (negativo) e cos(θ) > 0 (positivo)",
+        "sin(θ) > 0 (positivo) e cos(θ) > 0 (positivo)",
+        "sin(θ) < 0 (negativo) e cos(θ) < 0 (negativo)"
+      ],
+      ans: 0,
+      exp: "No 2º Quadrante, Y (seno) é positivo e X (cosseno) é negativo."
+    },
+    {
+      q: "No 3º Quadrante (180° < θ < 270°), quais são os sinais de sin(θ) e cos(θ)?",
+      opts: [
+        "sin(θ) > 0 e cos(θ) < 0",
+        "sin(θ) < 0 (negativo) e cos(θ) < 0 (negativo)",
+        "sin(θ) < 0 e cos(θ) > 0",
+        "sin(θ) > 0 e cos(θ) > 0"
+      ],
+      ans: 1,
+      exp: "No 3º Quadrante, tanto X (cos θ) quanto Y (sin θ) são negativos."
+    },
+    {
+      q: "No 4º Quadrante (270° < θ < 360°), quais são os sinais de sin(θ) e cos(θ)?",
+      opts: [
+        "sin(θ) > 0 e cos(θ) > 0",
+        "sin(θ) < 0 e cos(θ) < 0",
+        "sin(θ) < 0 (negativo) e cos(θ) > 0 (positivo)",
+        "sin(θ) > 0 e cos(θ) < 0"
+      ],
+      ans: 2,
+      exp: "No 4º Quadrante, X (cosseno) é positivo e Y (seno) é negativo."
+    },
+    {
+      q: "No 1º Quadrante (0° < θ < 90°), quais são os sinais de sin(θ) e cos(θ)?",
+      opts: [
+        "sin(θ) > 0 (positivo) e cos(θ) > 0 (positivo)",
+        "sin(θ) < 0 (negativo) e cos(θ) > 0 (positivo)",
+        "sin(θ) > 0 (positivo) e cos(θ) < 0 (negativo)",
+        "sin(θ) = 0 e cos(θ) < 0"
+      ],
+      ans: 0,
+      exp: "No 1º Quadrante, ambas as coordenadas são positivas."
+    },
+    {
+      q: "Por que utilizamos Coordenadas Homogêneas 4D (x, y, z, w) nas matrizes de transformação da Computação Gráfica?",
+      opts: [
+        "Para representar Translação, Rotação, Escala e Projeção como multiplicação de matrizes 4×4",
+        "Para eliminar o eixo Z e renderizar apenas em 2D",
+        "Para substituir o cálculo de vetores normais na equação de Phong",
+        "Para evitar o uso de seno e cosseno em rotações"
+      ],
+      ans: 0,
+      exp: "Com w=1 (pontos) e w=0 (vetores), a translação torna-se uma operação matricial 4×4."
+    },
+    {
+      q: "Na iluminação de Phong, qual componente depende do ângulo entre o vetor refletido R e o vetor do observador V?",
+      opts: [
+        "Componente Ambiente (Ia · Ka)",
+        "Componente Difusa Lambertiana (Id · Kd · (N·L))",
+        "Componente Especular (Ie · Ke · (R·V)^n)",
+        "Atenuação atmosférica"
+      ],
+      ans: 2,
+      exp: "O brilho especular concentra-se na direção do reflexo espelho R ponderado pelo expoente n."
+    },
+    {
+      q: "Na câmera sintética (M_wc), como são obtidos os eixos ortonormais (xc, yc, zc) a partir de Eye, At e Up?",
+      opts: [
+        "zc = normalizar(Eye - At), xc = normalizar(Up × zc), yc = zc × xc",
+        "zc = Eye + At, xc = Up · At, yc = Eye × Up",
+        "xc = Eye - At, yc = Eye + Up, zc = (0,0,0)",
+        "zc = Up, xc = At, yc = Eye"
+      ],
+      ans: 0,
+      exp: "O eixo zc aponta da cena para a câmera (Eye - At) no sistema de mão direita."
+    }
+  ];
+
+  let quizDeck = [];
+  let quizIdx = 0;
+  let inQuizModal = false;
+  let isPaused = false;
+  let survivalMode = false;
+  let isDead = false;
+  let inCoffeeCutscene = false;
+  let coffeeTimer = 0;
+  let inDanceCutscene = false;
+  let danceTimer = 0;
+  let coffeeBuffTimer = 0;
+  let energy = 100;
+  let windowsBrokenCount = 0;
+  let attackTimer = 0;
+  let shakeTimer = 0;
+  let stepAccumulator = 0;
+
+  const pState = {
+    pos: new THREE.Vector3(24.0, 0.2, 15.2),
+    velY: 0,
+    yaw: Math.PI,
+    camYaw: Math.PI,
+    camPitch: 0.34,
+    camDist: 7.4,
+    onGround: true,
+    wasOnRoof: false,
+    onLadderAuto: false,
+    climbing: null,
+    fountainTimer: 0,
+    damageCooldown: 0,
+    jumpscareCooldown: 0,
+    crossedOut: false,
+    quests: {
+      fotos: new Set(),
+      arvore: false,
+      poste: false,
+      predioSolar: false,
+      travessia: false,
+      cretoAcertos: 0
+    }
+  };
+
+  function atualizarHUD() {
+    const pct = Math.max(0, Math.min(100, Math.round(energy)));
+    const fill = document.getElementById('energy-fill');
+    fill.style.width = `${pct}%`;
+    fill.style.background = pct > 50
+      ? 'linear-gradient(90deg, #22c55e, #38bdf8)'
+      : (pct > 25 ? 'linear-gradient(90deg, #f59e0b, #facc15)' : '#ef4444');
+    document.getElementById('hp-text').textContent = `${pct}%`;
+
+    const invCount = collectibles.filter(c => c.coletado).length;
+    document.getElementById('inv-count').textContent = `${invCount}/${collectibles.length}`;
+    document.getElementById('foto-count').textContent = `${pState.quests.fotos.size}/5`;
+    document.getElementById('creto-count').textContent = `${pState.quests.cretoAcertos}/4`;
+
+    const grid = document.getElementById('inv-grid-container');
+    grid.innerHTML = collectibles.map(c => `
+      <div class="inv-slot ${c.coletado ? 'collected' : ''}">
+        <div style="font-size:20px; margin-bottom:4px;">${c.coletado ? '✅' : '📦'}</div>
+        <div style="font-weight:700; color:${c.coletado ? '#4ade80' : '#f8fafc'};">${c.nome}</div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+          ${c.coletado ? 'Coletado!' : `Mesa X=${c.x.toFixed(1)}, Z=${c.z.toFixed(1)}`}
+        </div>
+      </div>
+    `).join('');
+
+    document.getElementById('mq-foto-n').textContent = pState.quests.fotos.size;
+    document.getElementById('mq-creto-n').textContent = pState.quests.cretoAcertos;
+    const setBadge = (id, ok) => {
+      const el = document.getElementById(id);
+      if (ok) { el.className = 'q-badge q-done'; el.textContent = '✔ Concluída'; }
+    };
+    setBadge('mq-foto', pState.quests.fotos.size >= 3);
+    setBadge('mq-arvore', pState.quests.arvore);
+    setBadge('mq-poste', pState.quests.poste);
+    setBadge('mq-solar', pState.quests.predioSolar);
+    setBadge('mq-rua', pState.quests.travessia);
+    setBadge('mq-creto', pState.quests.cretoAcertos >= 4);
+  }
+
+  function aplicarDano(qtd, motivo, isScare = false) {
+    if (isDead || inCoffeeCutscene || pState.damageCooldown > 0) return;
+    pState.damageCooldown = 1.2;
+    if (isScare) SoundEngine.playScare();
+    shakeTimer = 0.28;
+    const flash = document.getElementById('damage-flash');
+    flash.style.opacity = '1';
+    setTimeout(() => { flash.style.opacity = '0'; }, 260);
+
+    if (survivalMode) {
+      energy = Math.max(0, energy - qtd);
+      atualizarHUD();
+      if (energy <= 0) {
+        isDead = true;
+        document.getElementById('gameover-reason').textContent = motivo;
+        document.getElementById('gameover-modal').style.display = 'flex';
+        return;
+      }
+      mostrarAlerta(`💔 -${qtd} Life! ${motivo}`, 'alert-danger', 2600, 'damage');
+    } else {
+      energy = Math.max(10, energy - qtd);
+      atualizarHUD();
+      mostrarAlerta(`⚠️ -${qtd} Life! ${motivo} (Café em X=35.8, Z=18.8)`, 'alert-danger', 2600, 'damage');
+    }
+  }
+
+  function abrirQuizCreto() {
+    quizDeck = [...bancoPerguntasCreto].sort(() => Math.random() - 0.5).slice(0, 4);
+    quizIdx = 0;
+    pState.quests.cretoAcertos = 0;
+    inQuizModal = true;
+    document.getElementById('creto-modal').style.display = 'flex';
+    renderizarPerguntaCreto();
+  }
+
+  function fecharModalCreto() {
+    inQuizModal = false;
+    document.getElementById('creto-modal').style.display = 'none';
+    canvas.focus();
+  }
+
+  function renderizarPerguntaCreto() {
+    const item = quizDeck[quizIdx];
+    document.getElementById('creto-progress').textContent = `Pergunta ${quizIdx + 1} / 4 • Acertos: ${pState.quests.cretoAcertos}`;
+    document.getElementById('creto-question').textContent = item.q;
+    document.getElementById('creto-feedback').textContent = '';
+    const box = document.getElementById('creto-options');
+    box.innerHTML = '';
+    const letras = ['A', 'B', 'C', 'D'];
+    item.opts.forEach((optText, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'quiz-opt';
+      btn.textContent = `${letras[idx]}) ${optText}`;
+      btn.onclick = () => responderCreto(idx);
+      box.appendChild(btn);
+    });
+  }
+
+  function responderCreto(escolha) {
+    const item = quizDeck[quizIdx];
+    const fb = document.getElementById('creto-feedback');
+    document.querySelectorAll('.quiz-opt').forEach(b => (b.disabled = true));
+
+    if (escolha === item.ans) {
+      SoundEngine.playCollect();
+      pState.quests.cretoAcertos++;
+      energy = Math.min(100, energy + 10);
+      fb.style.color = '#4ade80';
+      fb.textContent = `🎉 ACERTOU! ${item.exp}`;
+      mostrarAlerta(`🎉 Boa! +10 Life (${pState.quests.cretoAcertos}/4 acertos com Prof. Creto)`, 'alert-success', 2200, 'success');
+    } else {
+      SoundEngine.playError();
+      fb.style.color = '#f87171';
+      fb.textContent = `❌ ERROU! ${item.exp}`;
+      aplicarDano(15, 'Resposta incorreta no Quiz de Computação Gráfica!');
+    }
+    atualizarHUD();
+
+    setTimeout(() => {
+      quizIdx++;
+      if (quizIdx < 4) {
+        renderizarPerguntaCreto();
+      } else {
+        const aprov = pState.quests.cretoAcertos >= 3;
+        fb.style.color = aprov ? '#4ade80' : '#fbbf24';
+        fb.textContent = aprov
+          ? `🏆 Desafio concluído (${pState.quests.cretoAcertos}/4)! O Prof. Creto comemora sua aprovação!`
+          : `📚 Desafio encerrado (${pState.quests.cretoAcertos}/4). Fale novamente com o Prof. Creto para tentar outra bateria!`;
+        if (aprov) {
+          setTimeout(() => {
+            fecharModalCreto();
+            iniciarCutsceneDanca("🎓 APROVADO EM COMPUTAÇÃO GRÁFICA! Comemorando com o Prof. Creto!");
+          }, 1200);
+        }
+      }
+    }, 1600);
+  }
+
+  // Alunos na Praça
   const alunoSegundaVezPos = new THREE.Vector3(17.8, 0.2, 16.5);
   const alunoSegundaVez = criarAvatarRoblox(alunoSegundaVezPos.x, alunoSegundaVezPos.y, alunoSegundaVezPos.z, -25, 0xd97706, 0xfacc15, 0x1e293b, 0.96);
-  // Caderno / anotações na mão do aluno repetente
   const cadernoRep = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.05, 0.24), matPapel);
   cadernoRep.position.set(0, -0.35, 0.16);
   alunoSegundaVez.bD.add(cadernoRep);
@@ -1328,7 +1623,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
 
   const alunoEstudiosoPos = new THREE.Vector3(19.8, 0.2, 16.2);
   const alunoEstudioso = criarAvatarRoblox(alunoEstudiosoPos.x, alunoEstudiosoPos.y, alunoEstudiosoPos.z, 20, 0x2563eb, 0xfed7aa, 0x0f172a, 0.95);
-  // Livro aberto / caderno de estudos na mão do aluno estudioso
   const livroEst = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.26), new THREE.MeshStandardMaterial({ color: 0x38bdf8 }));
   livroEst.position.set(0, -0.35, 0.16);
   alunoEstudioso.bD.add(livroEst);
@@ -1383,7 +1677,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     { totem: dicaAluno2Action }
   );
 
-  // Personagem do Prof. Creto deslocado para a área lateral aberta junto ao poste (X=9.5, Z=22.2)
+  // Personagem do Prof. Creto (X=9.5, Z=22.2)
   const cretoPos = new THREE.Vector3(9.5, 0.2, 22.2);
   const profCreto = criarAvatarRoblox(cretoPos.x, cretoPos.y, cretoPos.z, 180, 0xf8fafc, 0xfed7aa, 0x1e3a8a, 1.12);
   const oculos = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.11, 0.08), matEsquadria);
@@ -1416,21 +1710,21 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     clickableTotems.push(m);
   });
   registrarAR(
-    "Prof. Creto (Praça do Bloco 734)",
+    "Prof. Creto (Área Lateral do Bloco 734)",
     "NPC QUALIFICADO • INTERAÇÃO [E] OU CLIQUE",
-    "Professor de Computação Gráfica na praça (X=31.5, Z=23.5). Aproxime-se e pressione [E] ou clique nele para iniciar o quiz!",
+    "Professor de Computação Gráfica na área lateral (X=9.5, Z=22.2). Aproxime-se e pressione [E] ou clique nele para iniciar o quiz!",
     "Avatar Articulado + Marcador 3D • [E] Falar & Quiz",
     [cretoPos.x, 1.2, cretoPos.z], [1.6, 2.6, 1.6],
     { totem: cretoTotemAction }
   );
 
-  // Vigilantes Patrimoniais (1 deslocado para a área lateral aberta ao lado do poste, 1 na calçada frontal)
+  // Vigilantes Patrimoniais
   const vigilantes = [
     { avatar: criarAvatarRoblox(7.8, 0.2, 20.4, 180, 0x1e3a8a, 0xfdba74, 0x0f172a, 1.02), home: new THREE.Vector3(7.8, 0.2, 20.4), alertado: false },
     { avatar: criarAvatarRoblox(32.5, 0.2, 15.2, 180, 0x1e3a8a, 0xfdba74, 0x0f172a, 1.02), home: new THREE.Vector3(32.5, 0.2, 15.2), alertado: false }
   ];
 
-  // Cachorro Guardião movido para área escondida e oposta (Fundos do Bloco 734: X=46.0, Z=56.2)
+  // Cachorro Guardião (Fundos do Bloco 734: X=46.0, Z=56.2)
   const caoGroup = new THREE.Group();
   const matCao = new THREE.MeshStandardMaterial({ color: 0x7c2d12, roughness: 0.8 });
   const caoCorpo = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.50, 0.50), matCao);
@@ -1628,17 +1922,14 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   );
 
   // ============================================================================
-  // 8. JOGADOR ARTICULADO, MINI-QUESTS, VIGILANTES, MODO FOTO & QUIZ CRETO
+  // 8. JOGADOR ARTICULADO, LANTERNA, MINI-QUESTS, VIGILANTES & MODO FOTO
   // ============================================================================
-  // CORREÇÃO: declarar lanternEnabled ANTES de usar no SpotLight
-  let lanternEnabled = MODO_NOITE;
   const player = criarAvatarRoblox(24.0, 0.2, 15.2, 0, 0x0284c7, 0xfacc15, 0x0f172a, 1.0);
   const xicaraMao = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.055, 0.13, 12), matPapel);
   xicaraMao.position.set(0, -0.38, 0.14);
   xicaraMao.visible = false;
   player.bD.add(xicaraMao);
 
-  // Lanterna estilo cone (SpotLight) na mão do personagem para imersão survival horror
   const lanternaMesh = new THREE.Mesh(
     new THREE.CylinderGeometry(0.045, 0.065, 0.24, 10),
     new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.3 })
@@ -1681,151 +1972,8 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   arBoxHelper.visible = false;
   scene.add(arBoxHelper);
   let arTimer = 0;
-  let isPaused = false;
-  let survivalMode = false;
-  let isDead = false;  
-  let inCoffeeCutscene = false;
-  let coffeeTimer = 0;
-  let inDanceCutscene = false;
-  let danceTimer = 0;
-  let coffeeBuffTimer = 0;
-  let energy = 100;
-  let windowsBrokenCount = 0;
-  let attackTimer = 0;
-  let shakeTimer = 0;
-  let stepAccumulator = 0;
 
-  const pState = {
-    pos: new THREE.Vector3(24.0, 0.2, 15.2),
-    velY: 0,
-    yaw: Math.PI,
-    camYaw: Math.PI,
-    camPitch: 0.34,
-    camDist: 7.4,
-    onGround: true,
-    wasOnRoof: false,
-    onLadderAuto: false,
-    climbing: null, // apenas árvores & postes via [R]
-    fountainTimer: 0,
-    damageCooldown: 0,
-    jumpscareCooldown: 0,
-    crossedOut: false,
-    quests: {
-      fotos: new Set(),
-      arvore: false,
-      poste: false,
-      predioSolar: false,
-      travessia: false,
-      cretoAcertos: 0
-    }
-  };
-
-  function atualizarHUD() {
-    const pct = Math.max(0, Math.min(100, Math.round(energy)));
-    const fill = document.getElementById('energy-fill');
-    fill.style.width = `${pct}%`;
-    fill.style.background = pct > 50
-      ? 'linear-gradient(90deg, #22c55e, #38bdf8)'
-      : (pct > 25 ? 'linear-gradient(90deg, #f59e0b, #facc15)' : '#ef4444');
-    document.getElementById('hp-text').textContent = `${pct}%`;
-
-    const invCount = collectibles.filter(c => c.coletado).length;
-    document.getElementById('inv-count').textContent = `${invCount}/${collectibles.length}`;
-    document.getElementById('foto-count').textContent = `${pState.quests.fotos.size}/5`;
-    document.getElementById('creto-count').textContent = `${pState.quests.cretoAcertos}/4`;
-
-    const grid = document.getElementById('inv-grid-container');
-    grid.innerHTML = collectibles.map(c => `
-      <div class="inv-slot ${c.coletado ? 'collected' : ''}">
-        <div style="font-size:20px; margin-bottom:4px;">${c.coletado ? '✅' : '📦'}</div>
-        <div style="font-weight:700; color:${c.coletado ? '#4ade80' : '#f8fafc'};">${c.nome}</div>
-        <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
-          ${c.coletado ? 'Coletado!' : `Mesa X=${c.x.toFixed(1)}, Z=${c.z.toFixed(1)}`}
-        </div>
-      </div>
-    `).join('');
-
-    document.getElementById('mq-foto-n').textContent = pState.quests.fotos.size;
-    document.getElementById('mq-creto-n').textContent = pState.quests.cretoAcertos;
-    const setBadge = (id, ok) => {
-      const el = document.getElementById(id);
-      if (ok) { el.className = 'q-badge q-done'; el.textContent = '✔ Concluída'; }
-    };
-    setBadge('mq-foto', pState.quests.fotos.size >= 3);
-    setBadge('mq-arvore', pState.quests.arvore);
-    setBadge('mq-poste', pState.quests.poste);
-    setBadge('mq-solar', pState.quests.predioSolar);
-    setBadge('mq-rua', pState.quests.travessia);
-    setBadge('mq-creto', pState.quests.cretoAcertos >= 4);
-  }
   atualizarHUD();
-
-  // Sistema de Notificações Limpo (Sem Spam — máximo 2 banners e cooldown por canal)
-  const alertStack = document.getElementById('alert-stack');
-  const activeChannelBanners = {};
-  const channelCooldowns = {};
-
-  function mostrarAlerta(texto, classe = 'alert-info', duracao = 2500, channel = 'general') {
-    const now = performance.now();
-    // Se já existe um banner ativo nesse canal, apenas atualiza o texto sem duplicar
-    if (activeChannelBanners[channel] && activeChannelBanners[channel].el.parentNode) {
-      activeChannelBanners[channel].el.textContent = texto;
-      activeChannelBanners[channel].el.className = 'alert-banner ' + classe;
-      clearTimeout(activeChannelBanners[channel].timer);
-      activeChannelBanners[channel].timer = setTimeout(() => {
-        if (activeChannelBanners[channel] && activeChannelBanners[channel].el.parentNode) {
-          activeChannelBanners[channel].el.remove();
-        }
-        delete activeChannelBanners[channel];
-      }, duracao);
-      return;
-    }
-
-    if (channelCooldowns[channel] && now < channelCooldowns[channel]) return;
-    channelCooldowns[channel] = now + 3400;
-
-    // Garante no máximo 2 notificações visíveis simultaneamente
-    while (alertStack.children.length >= 2) {
-      alertStack.firstChild.remove();
-    }
-
-    const div = document.createElement('div');
-    div.className = 'alert-banner ' + classe;
-    div.textContent = texto;
-    alertStack.appendChild(div);
-
-    const timer = setTimeout(() => {
-      if (div.parentNode) div.remove();
-      delete activeChannelBanners[channel];
-    }, duracao);
-    activeChannelBanners[channel] = { el: div, timer };
-  }
-
-  function aplicarDano(qtd, motivo, isScare = false) {
-    if (isDead || inCoffeeCutscene || pState.damageCooldown > 0) return;
-    pState.damageCooldown = 1.2;
-    if (isScare) SoundEngine.playScare();
-    shakeTimer = 0.28;
-    const flash = document.getElementById('damage-flash');
-    flash.style.opacity = '1';
-    setTimeout(() => { flash.style.opacity = '0'; }, 260);
-
-    if (survivalMode) {
-      energy = Math.max(0, energy - qtd);
-      atualizarHUD();
-      if (energy <= 0) {
-        isDead = true;
-        document.getElementById('gameover-reason').textContent = motivo;
-        document.getElementById('gameover-modal').style.display = 'flex';
-        return;
-      }
-      mostrarAlerta(`💔 -${qtd} Life! ${motivo}`, 'alert-danger', 2600, 'damage');
-    } else {
-      energy = Math.max(10, energy - qtd);
-      atualizarHUD();
-      mostrarAlerta(`⚠️ -${qtd} Life! ${motivo} (Café em X=35.8, Z=18.8)`, 'alert-danger', 2600, 'damage');
-    }
-  }
 
   function acionarVigilantes(motivo) {
     let novosAlertados = false;
@@ -1887,7 +2035,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     canvas.focus();
   });
 
-  // Modo Foto Técnica [P]
   let visorFotoAtivo = false;
   function alternarVisorFoto() {
     visorFotoAtivo = !visorFotoAtivo;
@@ -1938,163 +2085,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     canvas.focus();
   });
 
-  // Quiz Prof. Creto [G]
-  const bancoPerguntasCreto = [
-    {
-      q: "No ciclo trigonométrico usado em rotações 2D/3D, quais são os sinais de sin(θ) e cos(θ) no 2º Quadrante (90° < θ < 180°)?",
-      opts: [
-        "sin(θ) > 0 (positivo) e cos(θ) < 0 (negativo)",
-        "sin(θ) < 0 (negativo) e cos(θ) > 0 (positivo)",
-        "sin(θ) > 0 (positivo) e cos(θ) > 0 (positivo)",
-        "sin(θ) < 0 (negativo) e cos(θ) < 0 (negativo)"
-      ],
-      ans: 0,
-      exp: "No 2º Quadrante, Y (seno) é positivo e X (cosseno) é negativo."
-    },
-    {
-      q: "No 3º Quadrante (180° < θ < 270°), quais são os sinais de sin(θ) e cos(θ)?",
-      opts: [
-        "sin(θ) > 0 e cos(θ) < 0",
-        "sin(θ) < 0 (negativo) e cos(θ) < 0 (negativo)",
-        "sin(θ) < 0 e cos(θ) > 0",
-        "sin(θ) > 0 e cos(θ) > 0"
-      ],
-      ans: 1,
-      exp: "No 3º Quadrante, tanto X (cos θ) quanto Y (sin θ) são negativos."
-    },
-    {
-      q: "No 4º Quadrante (270° < θ < 360°), quais são os sinais de sin(θ) e cos(θ)?",
-      opts: [
-        "sin(θ) > 0 e cos(θ) > 0",
-        "sin(θ) < 0 e cos(θ) < 0",
-        "sin(θ) < 0 (negativo) e cos(θ) > 0 (positivo)",
-        "sin(θ) > 0 e cos(θ) < 0"
-      ],
-      ans: 2,
-      exp: "No 4º Quadrante, X (cosseno) é positivo e Y (seno) é negativo."
-    },
-    {
-      q: "No 1º Quadrante (0° < θ < 90°), quais são os sinais de sin(θ) e cos(θ)?",
-      opts: [
-        "sin(θ) > 0 (positivo) e cos(θ) > 0 (positivo)",
-        "sin(θ) < 0 (negativo) e cos(θ) > 0 (positivo)",
-        "sin(θ) > 0 (positivo) e cos(θ) < 0 (negativo)",
-        "sin(θ) = 0 e cos(θ) < 0"
-      ],
-      ans: 0,
-      exp: "No 1º Quadrante, ambas as coordenadas são positivas."
-    },
-    {
-      q: "Por que utilizamos Coordenadas Homogêneas 4D (x, y, z, w) nas matrizes de transformação da Computação Gráfica?",
-      opts: [
-        "Para representar Translação, Rotação, Escala e Projeção como multiplicação de matrizes 4×4",
-        "Para eliminar o eixo Z e renderizar apenas em 2D",
-        "Para substituir o cálculo de vetores normais na equação de Phong",
-        "Para evitar o uso de seno e cosseno em rotações"
-      ],
-      ans: 0,
-      exp: "Com w=1 (pontos) e w=0 (vetores), a translação torna-se uma operação matricial 4×4."
-    },
-    {
-      q: "Na iluminação de Phong, qual componente depende do ângulo entre o vetor refletido R e o vetor do observador V?",
-      opts: [
-        "Componente Ambiente (Ia · Ka)",
-        "Componente Difusa Lambertiana (Id · Kd · (N·L))",
-        "Componente Especular (Ie · Ke · (R·V)^n)",
-        "Atenuação atmosférica"
-      ],
-      ans: 2,
-      exp: "O brilho especular concentra-se na direção do reflexo espelho R ponderado pelo expoente n."
-    },
-    {
-      q: "Na câmera sintética (M_wc), como são obtidos os eixos ortonormais (xc, yc, zc) a partir de Eye, At e Up?",
-      opts: [
-        "zc = normalizar(Eye - At), xc = normalizar(Up × zc), yc = zc × xc",
-        "zc = Eye + At, xc = Up · At, yc = Eye × Up",
-        "xc = Eye - At, yc = Eye + Up, zc = (0,0,0)",
-        "zc = Up, xc = At, yc = Eye"
-      ],
-      ans: 0,
-      exp: "O eixo zc aponta da cena para a câmera (Eye - At) no sistema de mão direita."
-    }
-  ];
-
-  let quizDeck = [];
-  let quizIdx = 0;
-  let inQuizModal = false;
-
-  function abrirQuizCreto() {
-    quizDeck = [...bancoPerguntasCreto].sort(() => Math.random() - 0.5).slice(0, 4);
-    quizIdx = 0;
-    pState.quests.cretoAcertos = 0;
-    inQuizModal = true;
-    document.getElementById('creto-modal').style.display = 'flex';
-    renderizarPerguntaCreto();
-  }
-
-  function fecharModalCreto() {
-    inQuizModal = false;
-    document.getElementById('creto-modal').style.display = 'none';
-    canvas.focus();
-  }
-
-  function renderizarPerguntaCreto() {
-    const item = quizDeck[quizIdx];
-    document.getElementById('creto-progress').textContent = `Pergunta ${quizIdx + 1} / 4 • Acertos: ${pState.quests.cretoAcertos}`;
-    document.getElementById('creto-question').textContent = item.q;
-    document.getElementById('creto-feedback').textContent = '';
-    const box = document.getElementById('creto-options');
-    box.innerHTML = '';
-    const letras = ['A', 'B', 'C', 'D'];
-    item.opts.forEach((optText, idx) => {
-      const btn = document.createElement('button');
-      btn.className = 'quiz-opt';
-      btn.textContent = `${letras[idx]}) ${optText}`;
-      btn.onclick = () => responderCreto(idx);
-      box.appendChild(btn);
-    });
-  }
-
-  function responderCreto(escolha) {
-    const item = quizDeck[quizIdx];
-    const fb = document.getElementById('creto-feedback');
-    document.querySelectorAll('.quiz-opt').forEach(b => (b.disabled = true));
-
-    if (escolha === item.ans) {
-      SoundEngine.playCollect();
-      pState.quests.cretoAcertos++;
-      energy = Math.min(100, energy + 10);
-      fb.style.color = '#4ade80';
-      fb.textContent = `🎉 ACERTOU! ${item.exp}`;
-      mostrarAlerta(`🎉 Boa! +10 Life (${pState.quests.cretoAcertos}/4 acertos com Prof. Creto)`, 'alert-success', 2200, 'success');
-    } else {
-      SoundEngine.playError();
-      fb.style.color = '#f87171';
-      fb.textContent = `❌ ERROU! ${item.exp}`;
-      aplicarDano(15, 'Resposta incorreta no Quiz de Computação Gráfica!');
-    }
-    atualizarHUD();
-
-    setTimeout(() => {
-      quizIdx++;
-      if (quizIdx < 4) {
-        renderizarPerguntaCreto();
-      } else {
-        const aprov = pState.quests.cretoAcertos >= 3;
-        fb.style.color = aprov ? '#4ade80' : '#fbbf24';
-        fb.textContent = aprov
-          ? `🏆 Desafio concluído (${pState.quests.cretoAcertos}/4)! O Prof. Creto comemora sua aprovação!`
-          : `📚 Desafio encerrado (${pState.quests.cretoAcertos}/4). Fale novamente com o Prof. Creto para tentar outra bateria!`;
-        if (aprov) {
-          setTimeout(() => {
-            fecharModalCreto();
-            iniciarCutsceneDanca("🎓 APROVADO EM COMPUTAÇÃO GRÁFICA! Comemorando com o Prof. Creto!");
-          }, 1200);
-        }
-      }
-    }, 1600);
-  }
-
   document.getElementById('btn-creto').addEventListener('click', () => {
     const distCreto = Math.hypot(pState.pos.x - cretoPos.x, pState.pos.z - cretoPos.z);
     if (distCreto <= 4.2 && pState.pos.y < 2.2) {
@@ -2106,7 +2096,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   });
   document.getElementById('btn-close-creto').addEventListener('click', fecharModalCreto);
 
-  // Cutscenes (Dança e Café)
   function iniciarCutsceneDanca(mensagem = "💃 VITÓRIA NO BLOCO 734! Comemorando conquista!") {
     if (inCoffeeCutscene || isDead) return;
     inDanceCutscene = true;
@@ -2164,7 +2153,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     mostrarAlerta("☕ Cafezinho concluído! Life 100% + Turbo de Velocidade por 30s!", 'alert-success', 2800, 'success');
   }
 
-  // Tela Cheia
   document.getElementById('btn-fullscreen').addEventListener('click', () => {
     if (!document.fullscreenElement && !wrapper.classList.contains('pseudo-fullscreen')) {
       if (wrapper.requestFullscreen) {
@@ -2179,7 +2167,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     canvas.focus();
   });
 
-  // Painel Retrátil de Inventário & Quests [Q]
   const pauseModal = document.getElementById('pause-modal');
   function togglePauseModal(forceState = null) {
     if (inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal) return;
@@ -2202,7 +2189,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     });
   });
 
-  // Raycaster para clique nos Totens 3D
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   let downX = 0, downY = 0;
@@ -2229,7 +2215,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     }
   });
 
-  // Controles de Teclado
   const keys = {};
   window.addEventListener('keydown', (e) => {
     SoundEngine.init();
@@ -2284,7 +2269,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   });
   window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
-  // Suporte a toque (D-Pad mobile estilo Roblox)
   document.querySelectorAll('.touch-btn[data-key]').forEach((btn) => {
     const tKey = btn.getAttribute('data-key');
     const pressFn = (ev) => {
@@ -2304,7 +2288,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     btn.addEventListener('pointercancel', releaseFn);
   });
 
-  let isDragging = false, lastMX = 0, lastMY = 0;
   window.addEventListener('mousemove', (e) => {
     if (!isDragging || isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal) return;
     const dx = e.clientX - lastMX;
@@ -2370,7 +2353,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     if (!acertou) SoundEngine.tone(180, 0.08, 'sine', 0.05, 0, 90);
   }
 
-  // Botão [R] dedicado para escalar Árvore ou Poste de Iluminação
   function encontrarArvoreOuPosteProximo() {
     for (const arv of arvoresCoords) {
       if (Math.hypot(pState.pos.x - arv.x, pState.pos.z - arv.z) < 3.0) {
@@ -2410,30 +2392,24 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     SoundEngine.playSwitch();
   }
 
-  // Botão [E] dedicado a Interações (Coletar, Prof. Creto, Café, Totens, RA)
   function encontrarInteracaoE() {
-    // 1. Itens colecionáveis das mesas
     for (const item of collectibles) {
       if (!item.coletado && pState.pos.distanceTo(new THREE.Vector3(item.x, pState.pos.y, item.z)) < 2.6) {
         return { tipo: 'collectible', item };
       }
     }
-    // 2. Prof. Creto (Praça X=31.5, Z=23.5)
     if (Math.hypot(pState.pos.x - cretoPos.x, pState.pos.z - cretoPos.z) < 4.2 && pState.pos.y < 2.2) {
       return { tipo: 'creto' };
     }
-    // 3. Cafeteira
     if (Math.hypot(pState.pos.x - cafePos.x, pState.pos.z - cafePos.z) < 2.6 && pState.pos.y < 1.8) {
       return { tipo: 'coffee' };
     }
-    // 4. Totens Interativos
     for (const t of clickableTotems) {
       const td = t.userData.totem;
       if (td && Math.hypot(pState.pos.x - td.x, pState.pos.z - td.z) < 2.5 && pState.pos.y < 1.8) {
         return { tipo: 'totem', totem: td };
       }
     }
-    // 5. Objetos de Realidade Aumentada
     let melhor = null;
     let menorDist = 5.4;
     for (const obj of arObjects) {
@@ -2553,7 +2529,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     if (pState.damageCooldown > 0) pState.damageCooldown -= dt;
     if (pState.jumpscareCooldown > 0) pState.jumpscareCooldown -= dt;
 
-    // Animação do Pássaro do Campus CT
     const birdAng = elapsed * 0.42;
     const prevBirdX = birdGroup.position.x;
     const prevBirdZ = birdGroup.position.z;
@@ -2568,7 +2543,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     wingR.rotation.z = -flap;
     if (Math.sin(elapsed * 0.7) > 0.996) SoundEngine.playChirp();
 
-    // Pulsar balizador IoT + Aro do Prof. Creto + Água + Coletáveis
     iotBeacon.scale.setScalar(1.0 + 0.25 * Math.sin(elapsed * 8.0));
     cretoAro.scale.setScalar(1.0 + 0.12 * Math.sin(elapsed * 4.0));
     cretoBeacon.position.y = 2.52 + Math.sin(elapsed * 3.5) * 0.10;
@@ -2582,7 +2556,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     });
 
-    // Derramamento de Asfalto
     asphaltSpills.forEach((sp) => {
       if (sp.progress < 1.0) {
         sp.progress = Math.min(1.0, sp.progress + dt * 0.45);
@@ -2598,7 +2571,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     });
 
-    // Partículas
     for (let i = particles.length - 1; i >= 0; i--) {
       const s = particles[i];
       s.life -= dt;
@@ -2612,10 +2584,8 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     }
 
-    // Regra de Trânsito: Carros param com segurança se o personagem estiver na faixa de pedestres (X ~ 27.0)
     const pedestreNaFaixa = (pState.pos.x >= 25.0 && pState.pos.x <= 29.0 && pState.pos.z <= 13.0 && pState.pos.y < 1.6);
 
-    // Carros Animados na Via CT
     animatedCars.forEach((car) => {
       let bloqueadoFaixa = false;
       if (pedestreNaFaixa) {
@@ -2643,7 +2613,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     });
 
-    // Cutscenes de Dança & Café
     if (inDanceCutscene) {
       danceTimer -= dt;
       const beat = elapsed * 8.5;
@@ -2709,7 +2678,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     }
 
-    // Escalada de Árvore/Poste ([R]) vs Movimento Livre + Subida Direta na Escada
     let isMoving = false;
     pState.onLadderAuto = false;
 
@@ -2752,7 +2720,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
         document.getElementById('climb-hud').style.display = 'none';
       }
     } else {
-      // Movimento Livre Relativo à Câmera
       const speed = coffeeBuffTimer > 0 ? 9.8 : 7.0;
       let moveF = 0, moveR = 0;
       if (keys['w'] || keys['arrowup']) moveF += 1;
@@ -2764,7 +2731,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       const right = new THREE.Vector3(Math.cos(pState.camYaw), 0, -Math.sin(pState.camYaw));
       const moveVec = new THREE.Vector3().addScaledVector(fwd, moveF).addScaledVector(right, moveR);
 
-      // Subida Direta Automática na Escada Lateral (X=59.35, Z=24.0)
       const distEscada = Math.hypot(pState.pos.x - 59.35, pState.pos.z - 24.0);
       if (distEscada < 1.35 && (moveF > 0 || keys[' '])) {
         pState.onLadderAuto = true;
@@ -2801,7 +2767,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
           }
         }
 
-        // Gravidade e Pouso
         const groundY = getGroundY(pState.pos.x, pState.pos.z, pState.pos.y);
         if (pState.pos.y > groundY || pState.velY > 0) {
           pState.velY -= 19.5 * dt;
@@ -2839,7 +2804,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     player.grp.position.copy(pState.pos);
     player.grp.rotation.y = pState.yaw;
 
-    // Animação articulada de caminhada / escalada / ataque
     if (pState.climbing || pState.onLadderAuto) {
       const clSwing = Math.sin(elapsed * 10.0) * 0.65;
       player.bE.rotation.x = -2.2 + clSwing;
@@ -2864,7 +2828,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       player.bD.rotation.x = -Math.sin((1.0 - attackTimer / 0.36) * Math.PI) * 2.1;
     }
 
-    // Sensores IoT & Regras Ambientais (Sem Spam!)
     if (pState.pos.y >= 6.2) {
       const distArco = Math.abs(Math.hypot(pState.pos.x - 37.0, pState.pos.z - 42.0) - 22.0);
       const pertoBorda =
@@ -2906,12 +2869,10 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       acionarVigilantes('Aproximação na Escultura Cinética');
     }
 
-    // Jumpscare 2: Beco sombrio lateral (X < 15.5, Z > 37.5)
     if (pState.pos.x < 15.5 && pState.pos.z > 37.5 && pState.pos.y < 2.0) {
       dispararJumpscare('🦉👁️👁️', 'SUSTO NO BECO ESCURO!', 'Você entrou no corredor sombrio da Ala Sul!');
     }
 
-    // Cachorro Guardião nos Fundos Escondidos do Bloco (Z > 53.2)
     const distCaoPlayer = Math.hypot(pState.pos.x - caoHome.x, pState.pos.z - caoHome.z);
     if ((pState.pos.z > 53.2 && pState.pos.x > 22.0 && pState.pos.y < 2.0) || distCaoPlayer < 7.5) {
       if (distCaoPlayer < 6.0 && pState.jumpscareCooldown <= 0) {
@@ -2936,7 +2897,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     }
 
-    // IA dos Vigilantes Patrimoniais
     const jogadorEscapouNoAlto = (pState.pos.y >= 2.2) || (pState.climbing !== null && pState.pos.y >= 2.0);
     vigilantes.forEach((v) => {
       if (v.alertado) {
@@ -2972,7 +2932,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     });
 
-    // Prompt contextual de proximidade ([E] vs [R])
     const proxE = encontrarInteracaoE();
     const proxR = encontrarArvoreOuPosteProximo();
     const promptEl = document.getElementById('interact-prompt');
@@ -3102,7 +3061,7 @@ with st.sidebar:
         "proj": preset_base["proj"],
     }
 
-    btn_renderizar = st.button("🚀 Renderizar Cena (Ray Casting)", type="primary", use_container_width=True)
+    btn_renderizar = st.button("🚀 Renderizar Cena (Ray Casting)", type="primary", width="stretch")
 
 
 # ==============================================================================
@@ -3129,13 +3088,6 @@ with aba_webgl:
         ),
         height=735,
         scrolling=False,
-            return (
-        template
-        .replace("__MODO_NOITE__", "true" if modo_noite else "false")
-        .replace("__ATIVAR_SOL__", "true" if ativar_sol else "false")
-        .replace("__ATIVAR_SPOTS__", "true" if ativar_spots else "false")
-        + "\n</script>\n</body>\n</html>"
-        )
     )
 
 
@@ -3162,6 +3114,7 @@ with aba_rc:
             st.session_state.ultima_img_arr = img_arr
             st.session_state.ultima_legenda = legenda
             st.session_state.ultimo_pick_info = None
+            st.session_state.ultima_coord_clicada = None
 
     img_uint8 = (np.clip(st.session_state.ultima_img_arr, 0.0, 1.0) * 255).astype(np.uint8)
     pil_img = Image.fromarray(img_uint8)
@@ -3184,19 +3137,17 @@ with aba_rc:
                 if st.session_state.ultima_coord_clicada != (px, py):
                     st.session_state.ultima_coord_clicada = (px, py)
                     st.session_state.ultimo_pick_info = renderer.consultar_pick_buffer(px, py)
-                    st.rerun()
         else:
-            st.image(pil_img, use_container_width=True)
+            st.image(pil_img, width="stretch")
 
     with col_ctrl:
         st.subheader("🎯 Inspetor de Pixel (Picking)")
         st.write("Clique na imagem ao lado ou consulte manualmente uma coordenada `(X, Y)`:")
         p_x = st.number_input("Pixel X", 0, renderer.W - 1, renderer.W // 2)
         p_y = st.number_input("Pixel Y", 0, renderer.H - 1, renderer.H // 2)
-        if st.button("🔍 Inspecionar Coordenada (X, Y)", use_container_width=True):
+        if st.button("🔍 Inspecionar Coordenada (X, Y)", width="stretch"):
             st.session_state.ultima_coord_clicada = (int(p_x), int(p_y))
             st.session_state.ultimo_pick_info = renderer.consultar_pick_buffer(int(p_x), int(p_y))
-            st.rerun()
 
         st.divider()
         buf_png = io.BytesIO()
@@ -3206,7 +3157,7 @@ with aba_rc:
             data=buf_png.getvalue(),
             file_name=f"bloco734_raycasting_{renderer.W}x{renderer.H}.png",
             mime="image/png",
-            use_container_width=True,
+            width="stretch",
         )
 
 
