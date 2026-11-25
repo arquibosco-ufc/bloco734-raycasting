@@ -472,9 +472,7 @@ def carregar_malha_obj(caminho_obj, M_inst, max_faces=4500):
         'vert_normals_world': None,
     }
 
-  # Preserva malha contínua sem pular triângulos (elimina furos)
   faces_arr = np.array(faces[:max_faces], dtype=int)
-
   v_loc = np.array(vertices, dtype=np.float64)
   v_min, v_max = v_loc.min(axis=0), v_loc.max(axis=0)
   extensoes = v_max - v_min
@@ -1251,6 +1249,14 @@ def montar_cenario():
         )
     )
 
+  # --- ESCADA EXTERNA DE ACESSO AO TELHADO ---
+  M_escada = (
+      mat_translacao(59.35, 3.4, 24.0) @ mat_escala(0.55, 6.6, 1.1)
+  )
+  cena.append(
+      Primitiva('Escada Acesso Telhado', 'cubo', M_escada, mat_esquadria)
+  )
+
   # --- ÁRVORES NO ENTORNO ---
   arvores_cfg = [
       ('Árvore Bosque Esq.', 10.5, 28.5, 1.15),
@@ -1489,24 +1495,11 @@ def montar_cenario():
 
 
 # ==============================================================================
-# 7. MOTOR DE RENDERIZAÇÃO (COM ANTI-ALIASING E CONTROLES DE PERFORMANCE)
+# 7. MOTOR DE RENDERIZAÇÃO COM SUPERSAMPLING 2x2 (NITIDEZ MÁXIMA)
 # ==============================================================================
-def suavizar_imagem_aa(img):
-  """Filtro anti-aliasing bilinear 3x3 para eliminar pixelado nas bordas."""
-  pad = np.pad(img, ((1, 1), (1, 1), (0, 0)), mode='edge')
-  suave = (
-      4.0 * pad[1:-1, 1:-1]
-      + 2.0
-      * (pad[:-2, 1:-1] + pad[2:, 1:-1] + pad[1:-1, :-2] + pad[1:-1, 2:])
-      + 1.0 * (pad[:-2, :-2] + pad[:-2, 2:] + pad[2:, :-2] + pad[2:, 2:])
-  ) / 16.0
-  # Mantém nitidez misturando 65% original + 35% suavizado
-  return np.clip(0.65 * img + 0.35 * suave, 0.0, 1.0)
-
-
 class RenderizadorCT:
 
-  def __init__(self, largura=360, altura=360):
+  def __init__(self, largura=420, altura=420):
     self.W = largura
     self.H = altura
     self.cena, self.materiais_bloco, self.dados_escultura, self.extras_3d = (
@@ -1792,7 +1785,7 @@ class RenderizadorCT:
       ativar_reflexos=True,
       ativar_sombras=True,
       incluir_objs=True,
-      suavizar_aa=True,
+      ssaa=True,
   ):
     t0 = time.time()
     M_wc = construir_Mwc(cfg['eye'], cfg['at'], cfg['up'])
@@ -1826,13 +1819,13 @@ class RenderizadorCT:
         'I_amb': (
             np.array([0.06, 0.08, 0.14])
             if modo_noite
-            else np.array([0.26, 0.27, 0.30])
+            else np.array([0.28, 0.29, 0.32])
         ),
         'dir_cam': dir_c,
         'I_dir': (
             np.array([0.0, 0.0, 0.0])
             if modo_noite
-            else np.array([0.75, 0.73, 0.68])
+            else np.array([0.78, 0.76, 0.70])
         ),
         'postes_cam': postes_cam,
         'spot_pos_cam': spot_pos_c,
@@ -1847,47 +1840,57 @@ class RenderizadorCT:
 
     xmin, xmax, ymin, ymax = cfg['win']
     d = cfg['d']
-    u = np.linspace(xmin, xmax, self.W)
-    v = np.linspace(ymax, ymin, self.H)
-    U, V = np.meshgrid(u, v)
 
-    if cfg['proj'] == 'perspectiva':
-      O_cam = np.zeros((self.H, self.W, 3), dtype=np.float64)
-      D_cam = np.stack([U, V, np.full_like(U, -d)], axis=-1)
-      D_cam /= np.linalg.norm(D_cam, axis=-1, keepdims=True)
-    elif cfg['proj'] == 'ortografica':
-      O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
-      D_cam = np.broadcast_to(np.array([0.0, 0.0, -1.0]), O_cam.shape).copy()
-    elif cfg['proj'] == 'obliqua':
-      O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
-      l_ob = 0.5
-      ang_ob = np.deg2rad(45.0)
-      d_vec = np.array([-l_ob * np.cos(ang_ob), -l_ob * np.sin(ang_ob), -1.0])
-      d_vec /= np.linalg.norm(d_vec)
-      D_cam = np.broadcast_to(d_vec, O_cam.shape).copy()
+    # Supersampling real 2x2 (4 sub-raios por pixel)
+    offsets = [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)] if ssaa else [(0.0, 0.0)]
+    du = (xmax - xmin) / self.W
+    dv = (ymin - ymax) / self.H
 
-    t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min = self.tracar_raios(
-        O_cam, D_cam, incluir_objs=incluir_objs
-    )
-    img = self.sombrear(
-        O_cam,
-        D_cam,
-        t_min,
-        N_min,
-        P_w_min,
-        obj_idx,
-        sub_mat_min,
-        N_w_min,
-        luzes,
-        modo_noite=modo_noite,
-        permitir_reflexo=ativar_reflexos,
-        ativar_sombras=ativar_sombras,
-        ativar_caustics=ativar_caustics,
-        incluir_objs=incluir_objs,
-    )
+    u_base = np.linspace(xmin + 0.5 * du, xmax - 0.5 * du, self.W)
+    v_base = np.linspace(ymax + 0.5 * dv, ymin - 0.5 * dv, self.H)
 
-    if suavizar_aa:
-      img = suavizar_imagem_aa(img)
+    img_acum = np.zeros((self.H, self.W, 3), dtype=np.float64)
+    for ox, oy in offsets:
+      U, V = np.meshgrid(u_base + ox * du, v_base + oy * dv)
+      if cfg['proj'] == 'perspectiva':
+        O_cam = np.zeros((self.H, self.W, 3), dtype=np.float64)
+        D_cam = np.stack([U, V, np.full_like(U, -d)], axis=-1)
+        D_cam /= np.linalg.norm(D_cam, axis=-1, keepdims=True)
+      elif cfg['proj'] == 'ortografica':
+        O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
+        D_cam = np.broadcast_to(np.array([0.0, 0.0, -1.0]), O_cam.shape).copy()
+      elif cfg['proj'] == 'obliqua':
+        O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
+        l_ob = 0.5
+        ang_ob = np.deg2rad(45.0)
+        d_vec = np.array([-l_ob * np.cos(ang_ob), -l_ob * np.sin(ang_ob), -1.0])
+        d_vec /= np.linalg.norm(d_vec)
+        D_cam = np.broadcast_to(d_vec, O_cam.shape).copy()
 
+      t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min = self.tracar_raios(
+          O_cam, D_cam, incluir_objs=incluir_objs
+      )
+      img_sub = self.sombrear(
+          O_cam,
+          D_cam,
+          t_min,
+          N_min,
+          P_w_min,
+          obj_idx,
+          sub_mat_min,
+          N_w_min,
+          luzes,
+          modo_noite=modo_noite,
+          permitir_reflexo=ativar_reflexos,
+          ativar_sombras=ativar_sombras,
+          ativar_caustics=ativar_caustics,
+          incluir_objs=incluir_objs,
+      )
+      img_acum += img_sub
+
+    img = np.clip(img_acum / len(offsets), 0.0, 1.0)
+    # Correção gama sRGB para nitidez e contraste naturais
+    img = np.power(img, 1.0 / 1.12)
     turno_txt = 'NOITE' if modo_noite else 'DIA'
-    return img, f"{cfg['titulo']} [{turno_txt}] ({time.time() - t0:.2f}s)"
+    aa_txt = ' | SSAA 4x' if ssaa else ''
+    return img, f"{cfg['titulo']} [{turno_txt}{aa_txt}] ({time.time() - t0:.2f}s)"
