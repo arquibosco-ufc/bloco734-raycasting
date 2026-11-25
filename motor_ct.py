@@ -114,7 +114,7 @@ def testar_aabb(O, D, bmin, bmax, t_limite=np.inf):
 
 
 # ==============================================================================
-# 2. MATERIAIS, TEXTURAS PROCEDURAIS E CÁUSTICA POR REFRAÇÃO (LEI DE SNELL)
+# 2. MATERIAIS, TEXTURAS PROCEDURAIS E CÁUSTICA POR REFRAÇÃO
 # ==============================================================================
 class Material:
 
@@ -295,7 +295,7 @@ def calcular_caustica_fonte(P_world, N_world, fonte_info, modo_noite):
 
 
 # ==============================================================================
-# 3. PRIMITIVAS GEOMÉTRICAS COM BOUNDING BOX (AABB)
+# 3. PRIMITIVAS GEOMÉTRICAS COM BOUNDING BOX (AABB) E NORMAIS SUAVES
 # ==============================================================================
 class Primitiva:
 
@@ -366,10 +366,31 @@ class Primitiva:
       if len(verts_w) > 0:
         verts_h = np.hstack([verts_w, np.ones((len(verts_w), 1))])
         self.verts_cam = (M_wc @ verts_h.T).T[:, :3]
+        norms_w = self.dados.get('vert_normals_world')
+        if norms_w is not None and len(norms_w) == len(verts_w):
+          norms_cam = np.einsum('ij,nj->ni', M_wc[:3, :3], norms_w)
+          nlen = np.linalg.norm(norms_cam, axis=1, keepdims=True)
+          self.norms_cam = norms_cam / np.where(nlen > 1e-12, nlen, 1.0)
+        else:
+          self.norms_cam = None
       else:
         self.verts_cam = np.zeros((0, 3))
+        self.norms_cam = None
 
     self._calcular_aabb_camera(M_wc)
+
+
+def _calcular_normais_vertices(verts, faces):
+  v_norms = np.zeros_like(verts)
+  v0 = verts[faces[:, 0]]
+  v1 = verts[faces[:, 1]]
+  v2 = verts[faces[:, 2]]
+  fn = np.cross(v1 - v0, v2 - v0)
+  np.add.at(v_norms, faces[:, 0], fn)
+  np.add.at(v_norms, faces[:, 1], fn)
+  np.add.at(v_norms, faces[:, 2], fn)
+  lens = np.linalg.norm(v_norms, axis=1, keepdims=True)
+  return v_norms / np.where(lens > 1e-12, lens, 1.0)
 
 
 def criar_malha_cobertura_metalica(M_inst):
@@ -406,10 +427,10 @@ def criar_malha_cobertura_metalica(M_inst):
       ],
       dtype=int,
   )
-  return {'vertices_world': v_world, 'faces': faces}
+  return {'vertices_world': v_world, 'faces': faces, 'vert_normals_world': None}
 
 
-def carregar_malha_obj(caminho_obj, M_inst, max_faces=1200):
+def carregar_malha_obj(caminho_obj, M_inst, max_faces=4500):
   caminho_completo = os.path.join(
       os.path.dirname(os.path.abspath(__file__)), caminho_obj
   )
@@ -417,6 +438,7 @@ def carregar_malha_obj(caminho_obj, M_inst, max_faces=1200):
     return {
         'vertices_world': np.zeros((0, 3)),
         'faces': np.zeros((0, 3), dtype=int),
+        'vert_normals_world': None,
     }
 
   vertices = []
@@ -440,18 +462,18 @@ def carregar_malha_obj(caminho_obj, M_inst, max_faces=1200):
     return {
         'vertices_world': np.zeros((0, 3)),
         'faces': np.zeros((0, 3), dtype=int),
+        'vert_normals_world': None,
     }
 
   if not vertices or not faces:
     return {
         'vertices_world': np.zeros((0, 3)),
         'faces': np.zeros((0, 3), dtype=int),
+        'vert_normals_world': None,
     }
 
-  faces_arr = np.array(faces, dtype=int)
-  if len(faces_arr) > max_faces:
-    passo = max(1, len(faces_arr) // max_faces)
-    faces_arr = faces_arr[::passo]
+  # Preserva malha contínua sem pular triângulos (elimina furos)
+  faces_arr = np.array(faces[:max_faces], dtype=int)
 
   v_loc = np.array(vertices, dtype=np.float64)
   v_min, v_max = v_loc.min(axis=0), v_loc.max(axis=0)
@@ -465,7 +487,12 @@ def carregar_malha_obj(caminho_obj, M_inst, max_faces=1200):
 
   v_h = np.hstack([v_loc, np.ones((len(v_loc), 1))])
   v_world = (M_inst @ v_h.T).T[:, :3]
-  return {'vertices_world': v_world, 'faces': faces_arr}
+  v_norms_world = _calcular_normais_vertices(v_world, faces_arr)
+  return {
+      'vertices_world': v_world,
+      'faces': faces_arr,
+      'vert_normals_world': v_norms_world,
+  }
 
 
 # ==============================================================================
@@ -746,7 +773,7 @@ def intersect_bloco_ct(O_cam, D_cam, prim):
 
 
 # ==============================================================================
-# 5. INTERSEÇÃO GERAL DAS PRIMITIVAS COM FILTRO BOUNDING BOX
+# 5. INTERSEÇÃO GERAL DAS PRIMITIVAS COM FILTRO BOUNDING BOX E PHONG SMOOTHING
 # ==============================================================================
 def intersect_primitiva(O_cam, D_cam, prim, t_atual_min=np.inf):
   shape = D_cam.shape[:-1]
@@ -779,16 +806,22 @@ def intersect_primitiva(O_cam, D_cam, prim, t_atual_min=np.inf):
 
   if prim.tipo == 'malha':
     verts = prim.verts_cam
+    norms_v = prim.norms_cam
     faces = prim.dados['faces']
     t_best = np.full(shape, np.inf)
     N_best = np.zeros_like(D_cam)
 
-    # Filtra apenas os raios que realmente atravessam a Bounding Box da malha
     mask_box = testar_aabb(
         O_cam, D_cam, prim.aabb_cam[0], prim.aabb_cam[1], t_atual_min
     )
     if not np.any(mask_box):
-      return t_best, N_best, np.zeros_like(D_cam), np.zeros(shape, dtype=int), N_best
+      return (
+          t_best,
+          N_best,
+          np.zeros_like(D_cam),
+          np.zeros(shape, dtype=int),
+          N_best,
+      )
 
     O_sub = O_cam[mask_box]
     D_sub = D_cam[mask_box]
@@ -819,11 +852,22 @@ def intersect_primitiva(O_cam, D_cam, prim, t_atual_min=np.inf):
       )
       if np.any(hit_f):
         t_sub = np.where(hit_f, t, t_sub)
-        nf = np.cross(e1, e2)
-        nlen_f = np.linalg.norm(nf)
-        if nlen_f > 1e-12:
-          nf /= nlen_f
-        N_sub = np.where(hit_f[..., None], nf, N_sub)
+        if norms_v is not None:
+          w_b = 1.0 - u - v
+          nf_interp = (
+              w_b[..., None] * norms_v[f[0]]
+              + u[..., None] * norms_v[f[1]]
+              + v[..., None] * norms_v[f[2]]
+          )
+          nlen = np.linalg.norm(nf_interp, axis=-1, keepdims=True)
+          nf_interp /= np.where(nlen > 1e-12, nlen, 1.0)
+          N_sub = np.where(hit_f[..., None], nf_interp, N_sub)
+        else:
+          nf = np.cross(e1, e2)
+          nlen_f = np.linalg.norm(nf)
+          if nlen_f > 1e-12:
+            nf /= nlen_f
+          N_sub = np.where(hit_f[..., None], nf, N_sub)
 
     t_best[mask_box] = t_sub
     N_best[mask_box] = N_sub
@@ -1109,7 +1153,7 @@ def montar_cenario():
       )
   )
 
-  # --- ESPELHO D'ÁGUA / FONTE FRONTAL COM SPOTS SUBMERSOS PARA CÁUSTICA ---
+  # --- ESPELHO D'ÁGUA / FONTE FRONTAL ---
   fx_min, fx_max = 19.5, 34.5
   fz_min, fz_max = 16.8, 22.8
   f_cx, f_cz = 0.5 * (fx_min + fx_max), 0.5 * (fz_min + fz_max)
@@ -1320,7 +1364,7 @@ def montar_cenario():
         )
     )
 
-  # --- ELEMENTOS 3D EXTERNOS (.OBJ LOW-POLY) ---
+  # --- ELEMENTOS 3D EXTERNOS (.OBJ) ---
   mat_suv = Material(
       'SUV Urbano (Pintura Prata)',
       (0.72, 0.75, 0.78),
@@ -1445,8 +1489,21 @@ def montar_cenario():
 
 
 # ==============================================================================
-# 7. MOTOR DE RENDERIZAÇÃO (COM OPÇÕES DE OTIMIZAÇÃO EM TEMPO REAL)
+# 7. MOTOR DE RENDERIZAÇÃO (COM ANTI-ALIASING E CONTROLES DE PERFORMANCE)
 # ==============================================================================
+def suavizar_imagem_aa(img):
+  """Filtro anti-aliasing bilinear 3x3 para eliminar pixelado nas bordas."""
+  pad = np.pad(img, ((1, 1), (1, 1), (0, 0)), mode='edge')
+  suave = (
+      4.0 * pad[1:-1, 1:-1]
+      + 2.0
+      * (pad[:-2, 1:-1] + pad[2:, 1:-1] + pad[1:-1, :-2] + pad[1:-1, 2:])
+      + 1.0 * (pad[:-2, :-2] + pad[:-2, 2:] + pad[2:, :-2] + pad[2:, 2:])
+  ) / 16.0
+  # Mantém nitidez misturando 65% original + 35% suavizado
+  return np.clip(0.65 * img + 0.35 * suave, 0.0, 1.0)
+
+
 class RenderizadorCT:
 
   def __init__(self, largura=360, altura=360):
@@ -1523,7 +1580,6 @@ class RenderizadorCT:
             'proj': 'obliqua',
         },
     }
-    self.ultimo_buffer_pick = None
 
   def _aabb_global_cena(self, incluir_objs=True):
     valid_aabbs = [
@@ -1642,7 +1698,7 @@ class RenderizadorCT:
         D_dir_bcast = np.broadcast_to(L_dir, D_cam.shape)
         for prim in self.cena[2:]:
           if prim.eh_obj:
-            continue  # Sombra apenas das primitivas analíticas principais (10x mais rápido)
+            continue
           ts, _, _, _, _ = intersect_primitiva(P_eps, D_dir_bcast, prim)
           sombra_dir |= hit & np.isfinite(ts)
       ndl_d = np.maximum(0.0, np.einsum('...i,i->...', N_min, L_dir))
@@ -1736,6 +1792,7 @@ class RenderizadorCT:
       ativar_reflexos=True,
       ativar_sombras=True,
       incluir_objs=True,
+      suavizar_aa=True,
   ):
     t0 = time.time()
     M_wc = construir_Mwc(cfg['eye'], cfg['at'], cfg['up'])
@@ -1828,6 +1885,9 @@ class RenderizadorCT:
         ativar_caustics=ativar_caustics,
         incluir_objs=incluir_objs,
     )
+
+    if suavizar_aa:
+      img = suavizar_imagem_aa(img)
 
     turno_txt = 'NOITE' if modo_noite else 'DIA'
     return img, f"{cfg['titulo']} [{turno_txt}] ({time.time() - t0:.2f}s)"
