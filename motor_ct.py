@@ -1,9 +1,9 @@
-import time
+import math
 import numpy as np
 
 
 # ==============================================================================
-# 1. ÁLGEBRA LINEAR, QUATÉRNIOS, MATRIZES AFINS (4x4) E BOUNDING BOX (AABB)
+# ÁLGEBRA LINEAR, QUATÉRNIOS E MATRIZES DE TRANSFORMAÇÃO 4x4 (ATO II)
 # ==============================================================================
 def mat_identidade():
   return np.eye(4, dtype=np.float64)
@@ -11,2547 +11,1650 @@ def mat_identidade():
 
 def mat_translacao(tx, ty, tz):
   M = np.eye(4, dtype=np.float64)
-  M[0, 3], M[1, 3], M[2, 3] = tx, ty, tz
+  M[0, 3] = tx
+  M[1, 3] = ty
+  M[2, 3] = tz
   return M
 
 
 def mat_escala(sx, sy, sz):
   M = np.eye(4, dtype=np.float64)
-  M[0, 0], M[1, 1], M[2, 2] = sx, sy, sz
+  M[0, 0] = sx
+  M[1, 1] = sy
+  M[2, 2] = sz
   return M
 
 
-def mat_rotacao_x(ang_rad):
-  c, s = np.cos(ang_rad), np.sin(ang_rad)
-  return np.array(
-      [[1, 0, 0, 0], [0, c, -s, 0], [0, s, c, 0], [0, 0, 0, 1]],
-      dtype=np.float64,
-  )
-
-
-def mat_rotacao_y(ang_rad):
-  c, s = np.cos(ang_rad), np.sin(ang_rad)
-  return np.array(
-      [[c, 0, s, 0], [0, 1, 0, 0], [-s, 0, c, 0], [0, 0, 0, 1]],
-      dtype=np.float64,
-  )
-
-
-def mat_rotacao_z(ang_rad):
-  c, s = np.cos(ang_rad), np.sin(ang_rad)
-  return np.array(
-      [[c, -s, 0, 0], [s, c, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
-      dtype=np.float64,
-  )
-
-
-def mat_rotacao_eixo_arbitrario_quaternion(eixo, ang_rad, ponto_pivo=(0, 0, 0)):
-  u = np.array(eixo, dtype=np.float64)
-  norm_u = np.linalg.norm(u)
-  if norm_u < 1e-12:
-    return mat_identidade()
-  u /= norm_u
-  half = ang_rad / 2.0
-  w = np.cos(half)
-  x, y, z = u * np.sin(half)
-
-  R = np.array(
-      [
-          [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y), 0],
-          [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x), 0],
-          [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y), 0],
-          [0, 0, 0, 1],
-      ],
-      dtype=np.float64,
-  )
-
-  px, py, pz = ponto_pivo
-  return mat_translacao(px, py, pz) @ R @ mat_translacao(-px, -py, -pz)
-
-
-def mat_cisalhamento_xy(sh_xy):
+def mat_rotacao_x(rad):
+  c, s = math.cos(rad), math.sin(rad)
   M = np.eye(4, dtype=np.float64)
-  M[0, 1] = sh_xy
+  M[1, 1], M[1, 2] = c, -s
+  M[2, 1], M[2, 2] = s, c
   return M
 
 
-def mat_espelho_plano_arbitrario(ponto_plano, normal_plano):
-  p0 = np.array(ponto_plano, dtype=np.float64)
-  n = np.array(normal_plano, dtype=np.float64)
-  n /= np.linalg.norm(n)
+def mat_rotacao_y(rad):
+  c, s = math.cos(rad), math.sin(rad)
+  M = np.eye(4, dtype=np.float64)
+  M[0, 0], M[0, 2] = c, s
+  M[2, 0], M[2, 2] = -s, c
+  return M
 
-  R_esp = np.eye(4, dtype=np.float64)
-  R_esp[:3, :3] = np.eye(3) - 2.0 * np.outer(n, n)
-  return mat_translacao(*p0) @ R_esp @ mat_translacao(*(-p0))
+
+def mat_rotacao_z(rad):
+  c, s = math.cos(rad), math.sin(rad)
+  M = np.eye(4, dtype=np.float64)
+  M[0, 0], M[0, 1] = c, -s
+  M[1, 0], M[1, 1] = s, c
+  return M
+
+
+def quat_para_matriz(eixo, angulo_rad):
+  """Sub-quest 5.2 (Caminho B): Rotação em eixo arbitrário via Quatérnios unitários."""
+  ax = np.asarray(eixo, dtype=np.float64)
+  norm = np.linalg.norm(ax)
+  if norm < 1e-12:
+    return mat_identidade()
+  ux, uy, uz = ax / norm
+  half = 0.5 * angulo_rad
+  w = math.cos(half)
+  s = math.sin(half)
+  x, y, z = ux * s, uy * s, uz * s
+
+  M = np.eye(4, dtype=np.float64)
+  M[0, 0] = 1.0 - 2.0 * (y * y + z * z)
+  M[0, 1] = 2.0 * (x * y - w * z)
+  M[0, 2] = 2.0 * (x * z + w * y)
+
+  M[1, 0] = 2.0 * (x * y + w * z)
+  M[1, 1] = 1.0 - 2.0 * (x * x + z * z)
+  M[1, 2] = 2.0 * (y * z - w * x)
+
+  M[2, 0] = 2.0 * (x * z - w * y)
+  M[2, 1] = 2.0 * (y * z + w * x)
+  M[2, 2] = 1.0 - 2.0 * (x * x + y * y)
+  return M
+
+
+def mat_cisalhamento_xy(sh_xy=0.15, sh_zy=0.0):
+  """Quest Bônus 6.1: Matriz de Cisalhamento (Shear)."""
+  M = np.eye(4, dtype=np.float64)
+  M[1, 0] = sh_xy
+  M[1, 2] = sh_zy
+  return M
+
+
+def mat_espelho_plano(ponto_plano, normal_plano):
+  """Quest Bônus 6.2: Matriz de Reflexão Especular em Plano Arbitrário."""
+  p0 = np.asarray(ponto_plano, dtype=np.float64)
+  n = np.asarray(normal_plano, dtype=np.float64)
+  n = n / (np.linalg.norm(n) + 1e-12)
+  d = -np.dot(n, p0)
+
+  H = np.eye(4, dtype=np.float64)
+  H[:3, :3] -= 2.0 * np.outer(n, n)
+  H[:3, 3] = -2.0 * d * n
+  return H
+
+
+def aplicar_matriz_pontos(M, pts):
+  """Aplica matriz 4x4 a um array (N, 3) de pontos."""
+  pts_h = np.hstack([pts, np.ones((pts.shape[0], 1), dtype=np.float64)])
+  res = (M @ pts_h.T).T
+  return res[:, :3]
 
 
 def construir_Mwc(eye, at, up):
-  eye = np.array(eye, dtype=np.float64)
-  at = np.array(at, dtype=np.float64)
-  up = np.array(up, dtype=np.float64)
+  """Ato IV (Quests 8 e 9): Matriz Mundo -> Câmera (M_wc)."""
+  eye = np.asarray(eye, dtype=np.float64)
+  at = np.asarray(at, dtype=np.float64)
+  up = np.asarray(up, dtype=np.float64)
 
-  k = eye - at
-  norm_k = np.linalg.norm(k)
-  k = k / norm_k if norm_k > 1e-8 else np.array([0.0, 0.0, 1.0])
+  # Eixo Zc aponta de At para Eye (sistema mão direita)
+  zc = eye - at
+  zc /= np.linalg.norm(zc) + 1e-12
 
-  i = np.cross(up, k)
-  norm_i = np.linalg.norm(i)
-  if norm_i < 1e-8:
-    i = np.cross(np.array([0.0, 0.0, 1.0]), k)
-    norm_i = np.linalg.norm(i)
-  i /= norm_i
-  j = np.cross(k, i)
+  xc = np.cross(up, zc)
+  if np.linalg.norm(xc) < 1e-8:
+    up_alt = np.array([0.0, 0.0, 1.0])
+    xc = np.cross(up_alt, zc)
+  xc /= np.linalg.norm(xc) + 1e-12
 
-  R = np.array(
-      [
-          [i[0], i[1], i[2], 0.0],
-          [j[0], j[1], j[2], 0.0],
-          [k[0], k[1], k[2], 0.0],
-          [0.0, 0.0, 0.0, 1.0],
-      ],
-      dtype=np.float64,
-  )
-  return R @ mat_translacao(-eye[0], -eye[1], -eye[2])
+  yc = np.cross(zc, xc)
+
+  M = np.eye(4, dtype=np.float64)
+  M[0, :3] = xc
+  M[1, :3] = yc
+  M[2, :3] = zc
+  M[0, 3] = -np.dot(xc, eye)
+  M[1, 3] = -np.dot(yc, eye)
+  M[2, 3] = -np.dot(zc, eye)
+  return M
 
 
-def testar_aabb(O, D, bmin, bmax, t_limite=np.inf):
-  invD = 1.0 / np.where(np.abs(D) > 1e-8, D, 1e-8)
-  t1 = (bmin - O) * invD
-  t2 = (bmax - O) * invD
-  tmin = np.max(np.minimum(t1, t2), axis=-1)
-  tmax = np.min(np.maximum(t1, t2), axis=-1)
-  return (tmax >= np.maximum(tmin, 1e-4)) & (tmin < t_limite)
+def construir_Mcw(eye, at, up):
+  """Matriz inversa Câmera -> Mundo (M_cw)."""
+  Mwc = construir_Mwc(eye, at, up)
+  Mcw = np.eye(4, dtype=np.float64)
+  R = Mwc[:3, :3]
+  t = Mwc[:3, 3]
+  Mcw[:3, :3] = R.T
+  Mcw[:3, 3] = -R.T @ t
+  return Mcw
 
 
 # ==============================================================================
-# 2. MATERIAIS, TEXTURAS PROCEDURAIS E CÁUSTICA POR REFRAÇÃO
+# MATERIAIS E TEXTURAS PROCEDURAIS (ATO I - QUEST 3.1 & 3.2)
 # ==============================================================================
 class Material:
 
   def __init__(
-      self, nome, kd, ke, ka, brilho=32.0, refletividade=0.0, textura=None
+      self,
+      nome,
+      kd,
+      ka=None,
+      ke=(0.25, 0.25, 0.25),
+      shininess=24.0,
+      refletividade=0.0,
+      textura=None,
+      emissivo=(0.0, 0.0, 0.0),
   ):
     self.nome = nome
-    self.kd = np.array(kd, dtype=np.float64)
-    self.ke = np.array(ke, dtype=np.float64)
-    self.ka = np.array(ka, dtype=np.float64)
-    self.brilho = brilho
-    self.refletividade = refletividade
+    self.kd = np.asarray(kd, dtype=np.float64)
+    self.ka = (
+        np.asarray(ka, dtype=np.float64) if ka is not None else self.kd * 0.45
+    )
+    self.ke = np.asarray(ke, dtype=np.float64)
+    self.shininess = float(shininess)
+    self.refletividade = float(refletividade)
     self.textura = textura
+    self.emissivo = np.asarray(emissivo, dtype=np.float64)
 
 
-def avaliar_textura(tipo_tex, P_world, kd_base):
-  if tipo_tex is None:
-    return np.broadcast_to(kd_base, P_world.shape).copy()
+def criar_textura_placa_734():
+  """Gera bitmap procedural da placa '734' sem dependências externas."""
+  H, W = 64, 160
+  tex = np.ones((H, W, 3), dtype=np.float64) * 0.96
+  # Borda escura
+  tex[:4, :] = [0.10, 0.14, 0.22]
+  tex[-4:, :] = [0.10, 0.14, 0.22]
+  tex[:, :4] = [0.10, 0.14, 0.22]
+  tex[:, -4:] = [0.10, 0.14, 0.22]
 
-  x, y, z = P_world[..., 0], P_world[..., 1], P_world[..., 2]
+  cor_num = np.array([0.07, 0.10, 0.18])
+  # Dígito '7' (cols 22..52)
+  tex[14:21, 22:52] = cor_num
+  for r in range(21, 52):
+    c = int(50 - (r - 21) * 0.72)
+    tex[r, c - 4 : c + 3] = cor_num
 
-  if tipo_tex == 'asfalto':
-    ruido = (
-        np.sin(x * 19.7) * np.cos(z * 23.1) + np.sin((x + z) * 41.3)
-    ) * 0.5
-    base = 0.14 + 0.04 * ruido
-    cor = np.stack([base, base, base * 1.05], axis=-1)
-    faixa = (np.abs(z - 11.5) < 0.12) | (np.abs(z - 11.9) < 0.12)
-    cor = np.where(faixa[..., None], np.array([0.88, 0.72, 0.12]), cor)
-    return np.clip(cor, 0.0, 1.0)
+  # Dígito '3' (cols 66..96)
+  tex[14:20, 66:96] = cor_num
+  tex[30:36, 72:96] = cor_num
+  tex[46:52, 66:96] = cor_num
+  tex[14:52, 90:96] = cor_num
 
-  elif tipo_tex == 'calcada':
-    junta_x = np.abs((x % 1.5) - 0.75) > 0.72
-    junta_z = np.abs((z % 1.5) - 0.75) > 0.72
-    rejunte = junta_x | junta_z
-    tom = 0.68 + 0.03 * (((np.floor(x / 1.5) + np.floor(z / 1.5)) % 2))
-    cor = np.stack([tom, tom * 0.98, tom * 0.95], axis=-1)
-    return np.where(rejunte[..., None], np.array([0.42, 0.42, 0.42]), cor)
-
-  elif tipo_tex == 'placa_734':
-    u = np.clip((x - 19.2) / 3.6, 0.0, 0.999)
-    v = np.clip((y - 5.15) / 1.15, 0.0, 0.999)
-    grid = np.array(
-        [
-            [1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1],
-            [0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1],
-            [0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1],
-            [0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-            [0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1],
-        ],
-        dtype=bool,
-    )
-    gh, gw = grid.shape
-    iy = np.clip(((1.0 - v) * gh).astype(int), 0, gh - 1)
-    ix = np.clip((u * gw).astype(int), 0, gw - 1)
-    letra = grid[iy, ix]
-    cor_fundo = np.array([0.94, 0.95, 0.96])
-    cor_num = np.array([0.08, 0.16, 0.38])
-    return np.where(letra[..., None], cor_num, cor_fundo)
-
-  elif tipo_tex == 'agua_fonte':
-    w1 = np.sin(x * 3.8 + z * 2.7)
-    w2 = np.cos(x * 5.2 - z * 4.4)
-    w3 = np.sin((x - 27.0) ** 2 * 0.45 + (z - 19.8) ** 2 * 0.45)
-    onda = 0.5 + 0.22 * w1 + 0.18 * w2 + 0.10 * w3
-    cor_fundo = np.array([0.06, 0.28, 0.36])
-    cor_crista = np.array([0.32, 0.72, 0.85])
-    t = np.clip(onda, 0.0, 1.0)[..., None]
-    return (1.0 - t) * cor_fundo + t * cor_crista
-
-  return np.broadcast_to(kd_base, P_world.shape).copy()
-
-
-def calcular_caustica_fonte(P_world, N_world, fonte_info, modo_noite):
-  x_min, x_max = fonte_info['x_min'], fonte_info['x_max']
-  z_min, z_max = fonte_info['z_min'], fonte_info['z_max']
-  y_agua = fonte_info['y_agua']
-  spots = fonte_info['spots_submersos']
-
-  intensidade_global = 1.45 if modo_noite else 0.25
-  cor_caustica_base = (
-      np.array([0.62, 0.92, 1.00])
-      if modo_noite
-      else np.array([0.75, 0.95, 1.00])
-  )
-
-  acum_caustica = np.zeros_like(P_world)
-  px, py, pz = P_world[..., 0], P_world[..., 1], P_world[..., 2]
-
-  for spot_pos, spot_dir in spots:
-    sx, sy, sz = spot_pos
-    vx, vy, vz = px - sx, py - sy, pz - sz
-    dist = np.sqrt(vx**2 + vy**2 + vz**2) + 1e-8
-    dx, dy, dz = vx / dist, vy / dist, vz / dist
-
-    cos_cone = dx * spot_dir[0] + dy * spot_dir[1] + dz * spot_dir[2]
-    dentro_cone = (cos_cone > 0.35) & (dy > 0.02)
-
-    t_agua = (y_agua - sy) / np.where(np.abs(dy) > 1e-6, dy, 1e-6)
-    wx = sx + t_agua * dx
-    wz = sz + t_agua * dz
-
-    na_lamina = (
-        dentro_cone
-        & (t_agua > 0.05)
-        & (t_agua < dist)
-        & (wx >= x_min)
-        & (wx <= x_max)
-        & (wz >= z_min)
-        & (wz <= z_max)
-    )
-
-    k1x, k1z = 4.6, 3.9
-    k2x, k2z = -6.3, 5.1
-    k3x, k3z = 8.7, 7.4
-
-    fase1 = k1x * wx + k1z * wz
-    fase2 = k2x * wx + k2z * wz + 1.1
-    fase3 = k3x * wx + k3z * wz + 2.4
-
-    dh_dx = (
-        0.045 * k1x * np.cos(fase1)
-        + 0.032 * k2x * np.cos(fase2)
-        + 0.020 * k3x * np.cos(fase3)
-    )
-    dh_dz = (
-        0.045 * k1z * np.cos(fase1)
-        + 0.032 * k2z * np.cos(fase2)
-        + 0.020 * k3z * np.cos(fase3)
-    )
-    laplaciano = -(
-        0.045 * (k1x**2 + k1z**2) * np.sin(fase1)
-        + 0.032 * (k2x**2 + k2z**2) * np.sin(fase2)
-        + 0.020 * (k3x**2 + k3z**2) * np.sin(fase3)
-    )
-
-    convergencia = np.maximum(
-        0.0, laplaciano * 0.28 + 0.35 * np.sqrt(dh_dx**2 + dh_dz**2)
-    )
-    filamento = np.power(np.clip(convergencia, 0.0, 2.2), 2.3)
-
-    atenuacao_cone = np.power(np.maximum(0.0, (cos_cone - 0.35) / 0.65), 1.6)
-    atenuacao_dist = 1.0 / (1.0 + 0.012 * (dist**2))
-    ndl_fachada = np.maximum(
-        0.0, -(N_world[..., 0] * dx + N_world[..., 1] * dy + N_world[..., 2] * dz)
-    )
-
-    contrib = (
-        na_lamina
-        * filamento
-        * atenuacao_cone
-        * atenuacao_dist
-        * (0.35 + 0.65 * ndl_fachada)
-    )
-    acum_caustica += contrib[..., None] * cor_caustica_base * intensidade_global
-
-  no_fundo_fonte = (
-      (px >= x_min)
-      & (px <= x_max)
-      & (pz >= z_min)
-      & (pz <= z_max)
-      & (np.abs(py - y_agua) < 0.08)
-  )
-  if np.any(no_fundo_fonte):
-    sub_wave = np.sin(px * 6.5 + pz * 5.2) * np.cos(px * 5.8 - pz * 6.7)
-    c_sub = np.power(np.clip(0.55 + 0.65 * sub_wave, 0.0, 1.4), 2.6)
-    acum_caustica += (
-        no_fundo_fonte[..., None]
-        * c_sub[..., None]
-        * cor_caustica_base
-        * (1.1 if modo_noite else 0.35)
-    )
-
-  return acum_caustica
+  # Dígito '4' (cols 110..142)
+  tex[14:36, 110:116] = cor_num
+  tex[30:36, 110:142] = cor_num
+  tex[14:52, 132:138] = cor_num
+  return tex
 
 
 # ==============================================================================
-# 3. PRIMITIVAS GEOMÉTRICAS ANALÍTICAS COM AABB E METADADOS DE REALIDADE AUMENTADA
+# PRIMITIVAS ANALÍTICAS PARA RAY CASTING VETORIZADO (ATO I - QUEST 2)
 # ==============================================================================
 class Primitiva:
 
   def __init__(
       self,
+      pid,
       nome,
       tipo,
-      matriz_M,
+      grupo,
       material,
-      dados_extra=None,
-      grupo_ar=None,
-      descricao_ar=None,
-      transformacao_desc=None,
+      transformacao_txt,
+      descricao,
+      recebe_caustica=False,
   ):
+    self.pid = pid
     self.nome = nome
     self.tipo = tipo
-    self.M = matriz_M
-    self.mat = material
-    self.dados = dados_extra or {}
-    self.grupo_ar = grupo_ar or nome
-    self.descricao_ar = (
-        descricao_ar
-        or f'Primitiva {tipo.upper()} posicionada no primeiro octante.'
-    )
-    self.transformacao_desc = (
-        transformacao_desc or 'Transformação Afim 4x4 (T · R · S)'
-    )
-    self.M_total = self.M.copy()
-    self.M_inv = None
-    self.M_inv_T = None
-    self.aabb_cam = None
-    self.aabb_world = self._calcular_aabb_world()
+    self.grupo = grupo
+    self.material = material
+    self.transformacao_txt = transformacao_txt
+    self.descricao = descricao
+    self.recebe_caustica = recebe_caustica
 
-  def _pontos_canto_world(self):
-    if self.tipo == 'bloco_ct_arqueado':
-      d = self.dados
-      return np.array([
-          [d['x_min'], 0.0, d['z_min']],
-          [d['x_max'], 0.0, d['z_min']],
-          [d['x_max'], 0.0, d['z_max']],
-          [d['x_min'], 0.0, d['z_max']],
-          [d['x_min'], d['altura'], d['z_min']],
-          [d['x_max'], d['altura'], d['z_min']],
-          [d['x_max'], d['altura'], d['z_max']],
-          [d['x_min'], d['altura'], d['z_max']],
-      ])
-    elif self.tipo == 'malha':
-      return self.dados['vertices_world']
-    else:
-      ymin = (
-          -0.5
-          if self.tipo == 'cubo'
-          else (-1.0 if self.tipo == 'esfera' else 0.0)
+
+class CaixaAABB(Primitiva):
+
+  def __init__(
+      self,
+      pid,
+      nome,
+      grupo,
+      bmin,
+      bmax,
+      material,
+      transformacao_txt="T(x,y,z) · S(sx,sy,sz)",
+      descricao="",
+      recebe_caustica=False,
+  ):
+    super().__init__(
+        pid,
+        nome,
+        "Caixa / Prisma",
+        grupo,
+        material,
+        transformacao_txt,
+        descricao,
+        recebe_caustica,
+    )
+    self.bmin = np.asarray(bmin, dtype=np.float64)
+    self.bmax = np.asarray(bmax, dtype=np.float64)
+
+  def intersectar(self, O, D):
+    invD = np.where(np.abs(D) > 1e-9, 1.0 / D, 1e9)
+    t0 = (self.bmin - O) * invD
+    t1 = (self.bmax - O) * invD
+    tmin = np.minimum(t0, t1)
+    tmax = np.maximum(t0, t1)
+
+    t_enter = np.max(tmin, axis=1)
+    t_exit = np.min(tmax, axis=1)
+
+    hit = (t_exit >= np.maximum(t_enter, 1e-4)) & (t_enter > 1e-4)
+    t_hit = np.where(hit, t_enter, np.inf)
+
+    N = np.zeros_like(D)
+    if np.any(hit):
+      P = O[hit] + t_hit[hit, None] * D[hit]
+      eps = 1e-4
+      nh = np.zeros_like(P)
+      nh[np.abs(P[:, 0] - self.bmin[0]) < eps, 0] = -1.0
+      nh[np.abs(P[:, 0] - self.bmax[0]) < eps, 0] = 1.0
+      nh[np.abs(P[:, 1] - self.bmin[1]) < eps, 1] = -1.0
+      nh[np.abs(P[:, 1] - self.bmax[1]) < eps, 1] = 1.0
+      nh[np.abs(P[:, 2] - self.bmin[2]) < eps, 2] = -1.0
+      nh[np.abs(P[:, 2] - self.bmax[2]) < eps, 2] = 1.0
+      norm = np.linalg.norm(nh, axis=1, keepdims=True)
+      nh = np.where(norm > 1e-8, nh / norm, np.array([0.0, 1.0, 0.0]))
+      N[hit] = nh
+    return t_hit, N
+
+
+class Esfera(Primitiva):
+
+  def __init__(
+      self,
+      pid,
+      nome,
+      grupo,
+      centro,
+      raio,
+      material,
+      transformacao_txt="T(cx,cy,cz) · Q(eixo, θ) · S(r)",
+      descricao="",
+  ):
+    super().__init__(
+        pid, nome, "Esfera", grupo, material, transformacao_txt, descricao
+    )
+    self.c = np.asarray(centro, dtype=np.float64)
+    self.r = float(raio)
+
+  def intersectar(self, O, D):
+    oc = O - self.c
+    b = np.sum(oc * D, axis=1)
+    c = np.sum(oc * oc, axis=1) - self.r * self.r
+    disc = b * b - c
+    valid = disc >= 0.0
+    sqrt_d = np.sqrt(np.maximum(disc, 0.0))
+    t1 = -b - sqrt_d
+    t2 = -b + sqrt_d
+    t_hit = np.where(
+        valid & (t1 > 1e-4), t1, np.where(valid & (t2 > 1e-4), t2, np.inf)
+    )
+    hit = np.isfinite(t_hit)
+    N = np.zeros_like(D)
+    if np.any(hit):
+      P = O[hit] + t_hit[hit, None] * D[hit]
+      N[hit] = (P - self.c) / self.r
+    return t_hit, N
+
+
+class CilindroY(Primitiva):
+
+  def __init__(
+      self,
+      pid,
+      nome,
+      grupo,
+      cx,
+      cz,
+      y0,
+      y1,
+      raio,
+      material,
+      transformacao_txt="T(cx,y,cz) · S(r,h,r)",
+      descricao="",
+  ):
+    super().__init__(
+        pid, nome, "Cilindro", grupo, material, transformacao_txt, descricao
+    )
+    self.cx = float(cx)
+    self.cz = float(cz)
+    self.y0 = float(y0)
+    self.y1 = float(y1)
+    self.r = float(raio)
+
+  def intersectar(self, O, D):
+    ox = O[:, 0] - self.cx
+    oz = O[:, 2] - self.cz
+    dx = D[:, 0]
+    dz = D[:, 2]
+
+    a = dx * dx + dz * dz
+    b = 2.0 * (ox * dx + oz * dz)
+    c = ox * ox + oz * oz - self.r * self.r
+    disc = b * b - 4.0 * a * c
+
+    valid = (disc >= 0.0) & (a > 1e-10)
+    sqrt_d = np.sqrt(np.maximum(disc, 0.0))
+    inv_2a = np.where(a > 1e-10, 0.5 / a, 0.0)
+
+    t_hit = np.full(O.shape[0], np.inf, dtype=np.float64)
+    N = np.zeros_like(D)
+
+    for cand in [(-b - sqrt_d) * inv_2a, (-b + sqrt_d) * inv_2a]:
+      y_cand = O[:, 1] + cand * D[:, 1]
+      ok = (
+          valid
+          & (cand > 1e-4)
+          & (cand < t_hit)
+          & (y_cand >= self.y0)
+          & (y_cand <= self.y1)
       )
-      ymax = 0.5 if self.tipo == 'cubo' else 1.0
-      xmin = -0.5 if self.tipo == 'cubo' else -1.0
-      xmax = 0.5 if self.tipo == 'cubo' else 1.0
-      pts_loc = np.array([
-          [xmin, ymin, xmin],
-          [xmax, ymin, xmin],
-          [xmax, ymin, xmax],
-          [xmin, ymin, xmax],
-          [xmin, ymax, xmin],
-          [xmax, ymax, xmin],
-          [xmax, ymax, xmax],
-          [xmin, ymax, xmax],
-      ])
-      return (self.M @ np.hstack([pts_loc, np.ones((8, 1))]).T).T[:, :3]
+      if np.any(ok):
+        t_hit[ok] = cand[ok]
+        px = O[ok, 0] + cand[ok] * D[ok, 0] - self.cx
+        pz = O[ok, 2] + cand[ok] * D[ok, 2] - self.cz
+        N[ok, 0] = px / self.r
+        N[ok, 1] = 0.0
+        N[ok, 2] = pz / self.r
 
-  def _calcular_aabb_world(self):
-    pts_w = self._pontos_canto_world()
-    if len(pts_w) == 0:
-      return None
-    return (pts_w.min(axis=0), pts_w.max(axis=0))
+    # Tampas superior e inferior
+    dy_ok = np.abs(D[:, 1]) > 1e-8
+    for y_cap, ny in [(self.y1, 1.0), (self.y0, -1.0)]:
+      tc = np.where(dy_ok, (y_cap - O[:, 1]) / D[:, 1], np.inf)
+      px = O[:, 0] + tc * D[:, 0] - self.cx
+      pz = O[:, 2] + tc * D[:, 2] - self.cz
+      ok_c = dy_ok & (tc > 1e-4) & (tc < t_hit) & (px * px + pz * pz <= self.r * self.r)
+      if np.any(ok_c):
+        t_hit[ok_c] = tc[ok_c]
+        N[ok_c] = [0.0, ny, 0.0]
 
-  def _calcular_aabb_camera(self, M_wc):
-    pts_w = self._pontos_canto_world()
-    if len(pts_w) == 0:
-      self.aabb_cam = None
-      return
-    pts_c = (M_wc @ np.hstack([pts_w, np.ones((len(pts_w), 1))]).T).T[:, :3]
-    margem = 0.06
-    self.aabb_cam = (pts_c.min(axis=0) - margem, pts_c.max(axis=0) + margem)
-
-  def preparar_camera(self, M_wc):
-    self.M_total = M_wc @ self.M
-    self.M_inv = np.linalg.inv(self.M_total)
-    self.M_inv_T = self.M_inv.T
-
-    if self.tipo == 'malha':
-      verts_w = self.dados['vertices_world']
-      if len(verts_w) > 0:
-        verts_h = np.hstack([verts_w, np.ones((len(verts_w), 1))])
-        self.verts_cam = (M_wc @ verts_h.T).T[:, :3]
-      else:
-        self.verts_cam = np.zeros((0, 3))
-
-    self._calcular_aabb_camera(M_wc)
+    return t_hit, N
 
 
-def criar_malha_cobertura_metalica(M_inst):
-  v_loc = np.array(
+class ArcoBloco734(Primitiva):
+  """Parede arqueada tangencial (R=22m, centro=(37,42), quadrante X<=37, Z<=42)."""
+
+  def __init__(
+      self,
+      pid,
+      nome,
+      grupo,
+      cx,
+      cz,
+      y0,
+      y1,
+      raio,
+      material,
+      transformacao_txt="T(37,0,42) · Cilindro Parcial R=22m",
+      descricao="",
+  ):
+    super().__init__(
+        pid,
+        nome,
+        "Cilindro Parcial (Arco R=22m)",
+        grupo,
+        material,
+        transformacao_txt,
+        descricao,
+        recebe_caustica=True,
+    )
+    self.cx = float(cx)
+    self.cz = float(cz)
+    self.y0 = float(y0)
+    self.y1 = float(y1)
+    self.r = float(raio)
+
+  def intersectar(self, O, D):
+    ox = O[:, 0] - self.cx
+    oz = O[:, 2] - self.cz
+    dx = D[:, 0]
+    dz = D[:, 2]
+
+    a = dx * dx + dz * dz
+    b = 2.0 * (ox * dx + oz * dz)
+    c = ox * ox + oz * oz - self.r * self.r
+    disc = b * b - 4.0 * a * c
+    valid = (disc >= 0.0) & (a > 1e-10)
+    sqrt_d = np.sqrt(np.maximum(disc, 0.0))
+    inv_2a = np.where(a > 1e-10, 0.5 / a, 0.0)
+
+    t_hit = np.full(O.shape[0], np.inf, dtype=np.float64)
+    N = np.zeros_like(D)
+
+    for cand in [(-b - sqrt_d) * inv_2a, (-b + sqrt_d) * inv_2a]:
+      px = O[:, 0] + cand * D[:, 0]
+      py = O[:, 1] + cand * D[:, 1]
+      pz = O[:, 2] + cand * D[:, 2]
+      ok = (
+          valid
+          & (cand > 1e-4)
+          & (cand < t_hit)
+          & (py >= self.y0)
+          & (py <= self.y1)
+          & (px <= self.cx + 0.05)
+          & (pz <= self.cz + 0.05)
+      )
+      if np.any(ok):
+        t_hit[ok] = cand[ok]
+        N[ok, 0] = (px[ok] - self.cx) / self.r
+        N[ok, 1] = 0.0
+        N[ok, 2] = (pz[ok] - self.cz) / self.r
+
+    # Cobertura superior do setor circular (teto)
+    dy_ok = np.abs(D[:, 1]) > 1e-8
+    tc = np.where(dy_ok, (self.y1 - O[:, 1]) / D[:, 1], np.inf)
+    px = O[:, 0] + tc * D[:, 0]
+    pz = O[:, 2] + tc * D[:, 2]
+    r2 = (px - self.cx) ** 2 + (pz - self.cz) ** 2
+    ok_teto = (
+        dy_ok
+        & (tc > 1e-4)
+        & (tc < t_hit)
+        & (r2 <= self.r * self.r)
+        & (px <= self.cx + 0.05)
+        & (pz <= self.cz + 0.05)
+    )
+    if np.any(ok_teto):
+      t_hit[ok_teto] = tc[ok_teto]
+      N[ok_teto] = [0.0, 1.0, 0.0]
+
+    return t_hit, N
+
+
+class ConeY(Primitiva):
+
+  def __init__(
+      self,
+      pid,
+      nome,
+      grupo,
+      cx,
+      cz,
+      y_base,
+      altura,
+      raio_base,
+      material,
+      transformacao_txt="T(cx,y,cz) · S(r,h,r)",
+      descricao="",
+  ):
+    super().__init__(
+        pid, nome, "Cone", grupo, material, transformacao_txt, descricao
+    )
+    self.cx = float(cx)
+    self.cz = float(cz)
+    self.y0 = float(y_base)
+    self.h = float(altura)
+    self.y1 = self.y0 + self.h
+    self.r = float(raio_base)
+    self.k = (self.r / self.h) ** 2
+
+  def intersectar(self, O, D):
+    ox = O[:, 0] - self.cx
+    oz = O[:, 2] - self.cz
+    oy = O[:, 1] - self.y1
+
+    dx, dy, dz = D[:, 0], D[:, 1], D[:, 2]
+    a = dx * dx + dz * dz - self.k * dy * dy
+    b = 2.0 * (ox * dx + oz * dz - self.k * oy * dy)
+    c = ox * ox + oz * oz - self.k * oy * oy
+
+    disc = b * b - 4.0 * a * c
+    valid = (disc >= 0.0) & (np.abs(a) > 1e-10)
+    sqrt_d = np.sqrt(np.maximum(disc, 0.0))
+    inv_2a = np.where(np.abs(a) > 1e-10, 0.5 / a, 0.0)
+
+    t_hit = np.full(O.shape[0], np.inf, dtype=np.float64)
+    N = np.zeros_like(D)
+
+    for cand in [(-b - sqrt_d) * inv_2a, (-b + sqrt_d) * inv_2a]:
+      py = O[:, 1] + cand * D[:, 1]
+      ok = (
+          valid
+          & (cand > 1e-4)
+          & (cand < t_hit)
+          & (py >= self.y0)
+          & (py <= self.y1)
+      )
+      if np.any(ok):
+        t_hit[ok] = cand[ok]
+        px = O[ok, 0] + cand[ok] * D[ok, 0] - self.cx
+        pz = O[ok, 2] + cand[ok] * D[ok, 2] - self.cz
+        ry = np.sqrt(px * px + pz * pz) + 1e-9
+        nx = px / ry
+        nz = pz / ry
+        ny = self.r / self.h
+        nh = np.stack([nx, np.full_like(nx, ny), nz], axis=1)
+        nh /= np.linalg.norm(nh, axis=1, keepdims=True) + 1e-9
+        N[ok] = nh
+
+    # Base circular
+    dy_ok = np.abs(D[:, 1]) > 1e-8
+    tc = np.where(dy_ok, (self.y0 - O[:, 1]) / D[:, 1], np.inf)
+    px = O[:, 0] + tc * D[:, 0] - self.cx
+    pz = O[:, 2] + tc * D[:, 2] - self.cz
+    ok_b = dy_ok & (tc > 1e-4) & (tc < t_hit) & (px * px + pz * pz <= self.r * self.r)
+    if np.any(ok_b):
+      t_hit[ok_b] = tc[ok_b]
+      N[ok_b] = [0.0, -1.0, 0.0]
+
+    return t_hit, N
+
+
+class MalhaTriangulos(Primitiva):
+  """Malha de triângulos com interseção Möller–Trumbore vetorizada (usada nos losangos e abrigo cisalhado)."""
+
+  def __init__(
+      self,
+      pid,
+      nome,
+      grupo,
+      triangulos,
+      material,
+      transformacao_txt="Malha Poligonal Transformada (M 4x4)",
+      descricao="",
+  ):
+    super().__init__(
+        pid,
+        nome,
+        "Malha Triangular",
+        grupo,
+        material,
+        transformacao_txt,
+        descricao,
+    )
+    self.tris = np.asarray(triangulos, dtype=np.float64)  # (T, 3, 3)
+    e1 = self.tris[:, 1] - self.tris[:, 0]
+    e2 = self.tris[:, 2] - self.tris[:, 0]
+    fn = np.cross(e1, e2)
+    norms = np.linalg.norm(fn, axis=1, keepdims=True)
+    self.normals = np.where(norms > 1e-9, fn / norms, np.array([0.0, 1.0, 0.0]))
+
+    # AABB envoltória para aceleração rápida
+    all_v = self.tris.reshape(-1, 3)
+    self.bmin = np.min(all_v, axis=0) - 0.05
+    self.bmax = np.max(all_v, axis=0) + 0.05
+
+  def intersectar(self, O, D):
+    N_rays = O.shape[0]
+    t_hit = np.full(N_rays, np.inf, dtype=np.float64)
+    N = np.zeros_like(D)
+
+    # Teste rápido AABB
+    invD = np.where(np.abs(D) > 1e-9, 1.0 / D, 1e9)
+    t0 = (self.bmin - O) * invD
+    t1 = (self.bmax - O) * invD
+    t_enter = np.max(np.minimum(t0, t1), axis=1)
+    t_exit = np.min(np.maximum(t0, t1), axis=1)
+    mask_box = (t_exit >= np.maximum(t_enter, 1e-4)) & (t_enter > 1e-4)
+    if not np.any(mask_box):
+      return t_hit, N
+
+    idx_box = np.where(mask_box)[0]
+    Ob = O[idx_box]
+    Db = D[idx_box]
+
+    for ti in range(self.tris.shape[0]):
+      v0, v1, v2 = self.tris[ti]
+      e1 = v1 - v0
+      e2 = v2 - v0
+      h = np.cross(Db, e2)
+      a = np.sum(h * e1, axis=1)
+      valid = np.abs(a) > 1e-8
+      f = np.where(valid, 1.0 / a, 0.0)
+      s = Ob - v0
+      u = f * np.sum(s * h, axis=1)
+      valid &= (u >= 0.0) & (u <= 1.0)
+      q = np.cross(s, e1)
+      v = f * np.sum(Db * q, axis=1)
+      valid &= (v >= 0.0) & (u + v <= 1.0)
+      t = f * np.sum(e2 * q, axis=1)
+      valid &= (t > 1e-4) & (t < t_hit[idx_box])
+
+      if np.any(valid):
+        sub = idx_box[valid]
+        t_hit[sub] = t[valid]
+        fn = self.normals[ti]
+        flip = np.sum(Db[valid] * fn, axis=1) > 0
+        nh = np.where(flip[:, None], -fn, fn)
+        N[sub] = nh
+
+    return t_hit, N
+
+
+def gerar_caixa_triangulos(w, h, d, M):
+  """Constrói uma caixa centrada na origem transformada pela matriz 4x4 M."""
+  hw, hh, hd = w * 0.5, h * 0.5, d * 0.5
+  v = np.array(
       [
-          [0.0, 0.0, 0.0],
-          [1.0, 0.0, 0.0],
-          [1.0, 0.0, 1.0],
-          [0.0, 0.0, 1.0],
-          [0.0, 1.0, 0.0],
-          [1.0, 0.6, 0.0],
-          [1.0, 0.6, 1.0],
-          [0.0, 1.0, 1.0],
+          [-hw, -hh, -hd],
+          [hw, -hh, -hd],
+          [hw, hh, -hd],
+          [-hw, hh, -hd],
+          [-hw, -hh, hd],
+          [hw, -hh, hd],
+          [hw, hh, hd],
+          [-hw, hh, hd],
       ],
       dtype=np.float64,
   )
-  v_h = np.hstack([v_loc, np.ones((8, 1))])
-  v_world = (M_inst @ v_h.T).T[:, :3]
-
-  faces = np.array(
-      [
-          [4, 5, 6],
-          [4, 6, 7],
-          [0, 2, 1],
-          [0, 3, 2],
-          [0, 1, 5],
-          [0, 5, 4],
-          [2, 3, 7],
-          [2, 7, 6],
-          [1, 2, 6],
-          [1, 6, 5],
-          [3, 0, 4],
-          [3, 4, 7],
-      ],
-      dtype=int,
-  )
-  return {'vertices_world': v_world, 'faces': faces}
-
-
-# ==============================================================================
-# 3B. CONSTRUTORES LEVES ESTILO ROBLOX (CARROS, PERSONAGENS, PALMEIRA, MESAS, CAFÉ)
-# ==============================================================================
-def construir_veiculo_roblox(
-    cena,
-    nome_veiculo,
-    pos_xyz,
-    rot_y_deg,
-    mat_carroceria,
-    mat_vidro,
-    mat_pneu,
-    mat_farol,
-    mat_lanterna,
-    descricao_ar,
-):
-  x, y, z = pos_xyz
-  M_base = mat_translacao(x, y, z) @ mat_rotacao_y(np.deg2rad(rot_y_deg))
-
-  # Chassi inferior
-  M_chassi = M_base @ mat_translacao(0.0, 0.55, 0.0) @ mat_escala(2.0, 0.65, 4.3)
-  cena.append(
-      Primitiva(
-          f'{nome_veiculo} (Chassi)',
-          'cubo',
-          M_chassi,
-          mat_carroceria,
-          grupo_ar=nome_veiculo,
-          descricao_ar=descricao_ar,
-          transformacao_desc=f'Translação({x},{y},{z}) · RotY({rot_y_deg}°)',
-      )
-  )
-
-  # Cabine em vidro fumê refletivo
-  M_cabine = (
-      M_base @ mat_translacao(0.0, 1.12, -0.15) @ mat_escala(1.75, 0.54, 2.2)
-  )
-  cena.append(
-      Primitiva(
-          f'{nome_veiculo} (Cabine)',
-          'cubo',
-          M_cabine,
-          mat_vidro,
-          grupo_ar=nome_veiculo,
-          descricao_ar=descricao_ar,
-          transformacao_desc='Cabine em Vidro Fumê Refletivo (R=0.55)',
-      )
-  )
-
-  # 4 Rodas (Cilindros rotacionados 90° em Z)
-  rodas_offsets = [(-1.02, 0.36, 1.35), (0.82, 0.36, 1.35), (-1.02, 0.36, -1.35), (0.82, 0.36, -1.35)]
-  for idx_r, (rx, ry, rz) in enumerate(rodas_offsets, start=1):
-    M_roda = (
-        M_base
-        @ mat_translacao(rx, ry, rz)
-        @ mat_rotacao_z(np.deg2rad(-90.0))
-        @ mat_escala(0.36, 0.22, 0.36)
-    )
-    cena.append(
-        Primitiva(
-            f'{nome_veiculo} (Roda {idx_r})',
-            'cilindro',
-            M_roda,
-            mat_pneu,
-            grupo_ar=nome_veiculo,
-            descricao_ar=descricao_ar,
-            transformacao_desc='Cilindro Rotacionado (-90° Z) · Escala(0.36, 0.22, 0.36)',
-        )
-    )
-
-  # Faróis frontais e lanternas traseiras (Esferas)
-  for fx in (-0.65, 0.65):
-    M_farol = (
-        M_base @ mat_translacao(fx, 0.62, 2.15) @ mat_escala(0.16, 0.14, 0.12)
-    )
-    cena.append(
-        Primitiva(
-            f'{nome_veiculo} (Farol)',
-            'esfera',
-            M_farol,
-            mat_farol,
-            grupo_ar=nome_veiculo,
-            descricao_ar=descricao_ar,
-        )
-    )
-    M_lant = (
-        M_base @ mat_translacao(fx, 0.62, -2.15) @ mat_escala(0.16, 0.14, 0.12)
-    )
-    cena.append(
-        Primitiva(
-            f'{nome_veiculo} (Lanterna)',
-            'esfera',
-            M_lant,
-            mat_lanterna,
-            grupo_ar=nome_veiculo,
-            descricao_ar=descricao_ar,
-        )
-    )
-
-
-def construir_personagem_roblox(
-    cena,
-    nome_personagem,
-    pos_xyz,
-    rot_y_deg,
-    mat_torso,
-    mat_pele,
-    mat_calca,
-    descricao_ar,
-    escala_unif=1.0,
-):
-  x, y, z = pos_xyz
-  M_base = (
-      mat_translacao(x, y, z)
-      @ mat_rotacao_y(np.deg2rad(rot_y_deg))
-      @ mat_escala(escala_unif, escala_unif, escala_unif)
-  )
-
-  # Pernas
-  for lx, lado in [(-0.20, 'Esq.'), (0.20, 'Dir.')]:
-    M_perna = (
-        M_base @ mat_translacao(lx, 0.38, 0.0) @ mat_escala(0.32, 0.76, 0.34)
-    )
-    cena.append(
-        Primitiva(
-            f'{nome_personagem} (Perna {lado})',
-            'cubo',
-            M_perna,
-            mat_calca,
-            grupo_ar=nome_personagem,
-            descricao_ar=descricao_ar,
-            transformacao_desc=f'Hierarquia Articulada · Translação({x},{y},{z}) · RotY({rot_y_deg}°)',
-        )
-    )
-
-  # Torso
-  M_torso = M_base @ mat_translacao(0.0, 1.16, 0.0) @ mat_escala(0.76, 0.84, 0.40)
-  cena.append(
-      Primitiva(
-          f'{nome_personagem} (Torso)',
-          'cubo',
-          M_torso,
-          mat_torso,
-          grupo_ar=nome_personagem,
-          descricao_ar=descricao_ar,
-          transformacao_desc='Nó Raiz do Tronco (Cubo Escalado)',
-      )
-  )
-
-  # Cabeça
-  M_cab = M_base @ mat_translacao(0.0, 1.85, 0.0) @ mat_escala(0.48, 0.48, 0.48)
-  cena.append(
-      Primitiva(
-          f'{nome_personagem} (Cabeça)',
-          'cubo',
-          M_cab,
-          mat_pele,
-          grupo_ar=nome_personagem,
-          descricao_ar=descricao_ar,
-          transformacao_desc='Cabeça Estilizada (Cubo)',
-      )
-  )
-
-  # Braços
-  for bx, lado in [(-0.54, 'Esq.'), (0.54, 'Dir.')]:
-    M_braco = (
-        M_base @ mat_translacao(bx, 1.15, 0.0) @ mat_escala(0.26, 0.78, 0.28)
-    )
-    cena.append(
-        Primitiva(
-            f'{nome_personagem} (Braço {lado})',
-            'cubo',
-            M_braco,
-            mat_pele,
-            grupo_ar=nome_personagem,
-            descricao_ar=descricao_ar,
-        )
-    )
-
-
-def construir_palmeira_estilizada(cena, pos_xyz, mat_tronco, mat_folha):
-  px, py, pz = pos_xyz
-  nome_g = 'Palmeira Praça CT'
-  desc = (
-      'Palmeira tropical construída por composição de cilindros segmentados e '
-      'folhas cônicas rotacionadas por quatérnios no primeiro octante.'
-  )
-
-  # Tronco em 3 segmentos com leve inclinação
-  segmentos = [
-      (0.0, 0.0, 0.0, 0.24, 1.6, 0.0),
-      (0.0, 1.55, 0.0, 0.20, 1.6, 4.0),
-      (0.10, 3.10, 0.0, 0.16, 1.5, 7.0),
+  vt = aplicar_matriz_pontos(M, v)
+  faces = [
+      (0, 2, 1),
+      (0, 3, 2),
+      (4, 5, 6),
+      (4, 6, 7),
+      (0, 1, 5),
+      (0, 5, 4),
+      (2, 3, 7),
+      (2, 7, 6),
+      (0, 4, 7),
+      (0, 7, 3),
+      (1, 2, 6),
+      (1, 6, 5),
   ]
-  for idx_s, (ox, oy, oz, rad, alt, tilt) in enumerate(segmentos, start=1):
-    M_seg = (
-        mat_translacao(px + ox, py + oy, pz + oz)
-        @ mat_rotacao_z(np.deg2rad(-tilt))
-        @ mat_escala(rad, alt, rad)
-    )
-    cena.append(
-        Primitiva(
-            f'{nome_g} (Tronco {idx_s})',
-            'cilindro',
-            M_seg,
-            mat_tronco,
-            grupo_ar=nome_g,
-            descricao_ar=desc,
-            transformacao_desc='Cilindros Escalonados + Inclinação Z',
-        )
-    )
-
-  # Folhas da copa (6 cones inclinados ao redor do topo)
-  topo = (px + 0.24, py + 4.55, pz)
-  for k in range(6):
-    ang_y = k * (2.0 * np.pi / 6.0)
-    eixo_inclinacao = (-np.sin(ang_y), 0.0, np.cos(ang_y))
-    M_folha = (
-        mat_rotacao_eixo_arbitrario_quaternion(
-            eixo_inclinacao, np.deg2rad(68.0), topo
-        )
-        @ mat_translacao(*topo)
-        @ mat_escala(0.45, 2.25, 0.45)
-    )
-    cena.append(
-        Primitiva(
-            f'{nome_g} (Palma {k+1})',
-            'cone',
-            M_folha,
-            mat_folha,
-            grupo_ar=nome_g,
-            descricao_ar=desc,
-            transformacao_desc='Cone + Rotação por Quatérnio em Eixo Arbitrário',
-        )
-    )
-
-
-def construir_mesas_trabalho_e_cafe(
-    cena,
-    mat_madeira,
-    mat_metal,
-    mat_tela_pc,
-    mat_papel,
-    mat_cafe_corpo,
-    mat_led_cafe,
-):
-  """Cria mesas de trabalho com PCs e pilhas de atividades + Máquina de Café."""
-  mesas_cfg = [
-      (
-          'Mesa Trabalho 1 (Atividades 1–3)',
-          (45.6, 0.20, 18.2),
-          'pc',
-          'Bancada acadêmica com computador para execução das Atividades 1, 2 e 3 de CG I.',
-      ),
-      (
-          'Mesa Trabalho 2 (Atividades 4–5)',
-          (47.8, 0.20, 18.2),
-          'papel',
-          'Bancada de projeto com folhas técnicas das Atividades 4 e 5.',
-      ),
-      (
-          'Mesa Avaliações (AP1 e AP2)',
-          (45.6, 0.20, 19.6),
-          'papel',
-          'Mesa de entrega das Avaliações Parciais AP1 e AP2.',
-      ),
-      (
-          'Estação Trabalho Final (Bloco 734)',
-          (39.2, 0.20, 18.6),
-          'pc',
-          'Estação principal onde o Trabalho Final (Bloco 734 Ray Casting) é compilado.',
-      ),
-  ]
-
-  for nome_m, (mx, my, mz), tipo_item, desc_m in mesas_cfg:
-    # Tampo da mesa
-    M_tampo = mat_translacao(mx, my + 0.76, mz) @ mat_escala(1.45, 0.08, 0.85)
-    cena.append(
-        Primitiva(
-            f'{nome_m} (Tampo)',
-            'cubo',
-            M_tampo,
-            mat_madeira,
-            grupo_ar=nome_m,
-            descricao_ar=desc_m,
-        )
-    )
-    # 4 Pés metálicos
-    for dx in (-0.64, 0.64):
-      for dz in (-0.34, 0.34):
-        M_pe = mat_translacao(mx + dx, my, mz + dz) @ mat_escala(
-            0.04, 0.74, 0.04
-        )
-        cena.append(
-            Primitiva(
-                f'{nome_m} (Pé)',
-                'cilindro',
-                M_pe,
-                mat_metal,
-                grupo_ar=nome_m,
-                descricao_ar=desc_m,
-            )
-        )
-
-    if tipo_item == 'pc':
-      # Monitor e base
-      M_mon = mat_translacao(mx, my + 1.05, mz - 0.12) @ mat_escala(
-          0.62, 0.40, 0.06
-      )
-      cena.append(
-          Primitiva(
-              f'{nome_m} (Monitor PC)',
-              'cubo',
-              M_mon,
-              mat_tela_pc,
-              grupo_ar=nome_m,
-              descricao_ar=desc_m,
-          )
-      )
-      M_cpu = mat_translacao(mx + 0.46, my + 0.96, mz - 0.08) @ mat_escala(
-          0.20, 0.36, 0.38
-      )
-      cena.append(
-          Primitiva(
-              f'{nome_m} (Gabinete PC)',
-              'cubo',
-              M_cpu,
-              mat_metal,
-              grupo_ar=nome_m,
-              descricao_ar=desc_m,
-          )
-      )
-    else:
-      # Pilha de folhas / provas
-      M_folhas = (
-          mat_translacao(mx - 0.12, my + 0.83, mz + 0.05)
-          @ mat_rotacao_y(np.deg2rad(14.0))
-          @ mat_escala(0.32, 0.06, 0.42)
-      )
-      cena.append(
-          Primitiva(
-              f'{nome_m} (Documentos)',
-              'cubo',
-              M_folhas,
-              mat_papel,
-              grupo_ar=nome_m,
-              descricao_ar=desc_m,
-          )
-      )
-
-  # --- MÁQUINA DE CAFÉ INTERATIVA (X=48.3, Z=19.6) ---
-  cx, cy, cz = 48.3, 0.20, 19.6
-  nome_cafe = 'Máquina de Café Expresso CT'
-  desc_cafe = (
-      'Cafeteira automática do Centro de Tecnologia. Interaja para assistir à '
-      'cutscene do cafezinho e recuperar as energias!'
-  )
-  M_balcao = mat_translacao(cx, cy + 0.45, cz) @ mat_escala(0.85, 0.90, 0.75)
-  cena.append(
-      Primitiva(
-          f'{nome_cafe} (Balcão)',
-          'cubo',
-          M_balcao,
-          mat_madeira,
-          grupo_ar=nome_cafe,
-          descricao_ar=desc_cafe,
-      )
-  )
-  M_maq = mat_translacao(cx, cy + 1.18, cz) @ mat_escala(0.46, 0.56, 0.44)
-  cena.append(
-      Primitiva(
-          f'{nome_cafe} (Cafeteira)',
-          'cubo',
-          M_maq,
-          mat_cafe_corpo,
-          grupo_ar=nome_cafe,
-          descricao_ar=desc_cafe,
-      )
-  )
-  M_xicara = mat_translacao(cx, cy + 0.92, cz - 0.14) @ mat_escala(
-      0.07, 0.11, 0.07
-  )
-  cena.append(
-      Primitiva(
-          f'{nome_cafe} (Xícara)',
-          'cilindro',
-          M_xicara,
-          mat_papel,
-          grupo_ar=nome_cafe,
-          descricao_ar=desc_cafe,
-      )
-  )
-  M_led = mat_translacao(cx + 0.14, cy + 1.34, cz - 0.23) @ mat_escala(
-      0.04, 0.04, 0.04
-  )
-  cena.append(
-      Primitiva(
-          f'{nome_cafe} (LED Pronta)',
-          'esfera',
-          M_led,
-          mat_led_cafe,
-          grupo_ar=nome_cafe,
-          descricao_ar=desc_cafe,
-      )
-  )
+  return [np.array([vt[a], vt[b], vt[c]]) for (a, b, c) in faces]
 
 
 # ==============================================================================
-# 3C. MODELO PARAMÉTRICO: ESCULTURA CINÉTICA EM AÇO (5 LOSANGOS ROTACIONADOS A 45°)
-# ==============================================================================
-def gerar_parametros_escultura_cinetica(
-    origem_base=(15.0, 0.2, 22.0),
-    qtd_quadros=5,
-    lado_base=2.35,
-    espessura_perfil=0.14,
-    profundidade_perfil=0.16,
-    espacamento_z=0.58,
-    deslocamento_x_passo=0.22,
-    variacao_escala_passo=0.055,
-    rotacao_conjunto_y_deg=-24.0,
-):
-  ox, oy, oz = origem_base
-  M_conjunto = mat_translacao(ox, oy, oz) @ mat_rotacao_y(
-      np.deg2rad(rotacao_conjunto_y_deg)
-  )
-
-  base_larg = 3.20
-  base_alt = 0.28
-  base_prof = 3.40
-
-  quadros = []
-  z_inicio = -((qtd_quadros - 1) * espacamento_z) / 2.0
-
-  for k in range(qtd_quadros):
-    fator_centro = k - (qtd_quadros - 1) / 2.0
-    L_k = lado_base * (1.0 - variacao_escala_passo * fator_centro)
-    r_k = L_k / np.sqrt(2.0)
-
-    thetas = np.deg2rad([0.0, 90.0, 180.0, 270.0])
-    vx = r_k * np.cos(thetas)
-    vy = r_k * np.sin(thetas)
-
-    cx_k = fator_centro * deslocamento_x_passo
-    cy_k = base_alt + r_k + espessura_perfil * 0.35
-    cz_k = z_inicio + k * espacamento_z
-
-    verts_loc = np.column_stack([cx_k + vx, cy_k + vy, np.full(4, cz_k)])
-    verts_h = np.hstack([verts_loc, np.ones((4, 1))])
-    verts_world = (M_conjunto @ verts_h.T).T[:, :3]
-
-    barras_M = []
-    for i in range(4):
-      p1 = verts_loc[i]
-      p2 = verts_loc[(i + 1) % 4]
-      vetor_aresta = p2 - p1
-      comp = np.linalg.norm(vetor_aresta)
-      ang_aresta = np.arctan2(vetor_aresta[1], vetor_aresta[0])
-      pm = 0.5 * (p1 + p2)
-
-      M_barra_loc = (
-          mat_translacao(pm[0], pm[1], pm[2])
-          @ mat_rotacao_z(ang_aresta)
-          @ mat_escala(
-              comp + espessura_perfil * 0.72,
-              espessura_perfil,
-              profundidade_perfil,
-          )
-      )
-      barras_M.append(M_conjunto @ M_barra_loc)
-
-    p_inf = verts_loc[3]
-    M_sapata_loc = mat_translacao(
-        p_inf[0], base_alt + 0.04, p_inf[2]
-    ) @ mat_escala(espessura_perfil * 1.4, 0.12, profundidade_perfil * 1.3)
-
-    quadros.append({
-        'indice': k + 1,
-        'lado': L_k,
-        'vertices_world': verts_world,
-        'barras_M': barras_M,
-        'haste_M': M_conjunto @ M_sapata_loc,
-    })
-
-  M_base = (
-      M_conjunto
-      @ mat_translacao(0.0, base_alt * 0.5, 0.0)
-      @ mat_escala(base_larg, base_alt, base_prof)
-  )
-
-  bx, by, bz = base_larg * 0.5, base_alt, base_prof * 0.5
-  base_pts_loc = np.array([
-      [-bx, 0.0, -bz],
-      [bx, 0.0, -bz],
-      [bx, 0.0, bz],
-      [-bx, 0.0, bz],
-      [-bx, by, -bz],
-      [bx, by, -bz],
-      [bx, by, bz],
-      [-bx, by, bz],
-  ])
-  base_pts_world = (M_conjunto @ np.hstack([base_pts_loc, np.ones((8, 1))]).T).T[
-      :, :3
-  ]
-
-  return {
-      'M_base': M_base,
-      'base_pts_world': base_pts_world,
-      'quadros': quadros,
-      'espessura_perfil': espessura_perfil,
-  }
-
-
-# ==============================================================================
-# 4. MODELAGEM DO BLOCO CT ASFALTO (33m x 44m COM ARCO TANGENCIAL)
-# ==============================================================================
-def construir_geometria_bloco_ct():
-  return {
-      'cx': 37.0,
-      'cz': 42.0,
-      'raio': 22.0,
-      'x_min': 15.0,
-      'x_max': 59.0,
-      'z_min': 20.0,
-      'z_max': 53.0,
-      'altura': 6.6,
-      'altura_platibanda': 5.0,
-  }
-
-
-def intersect_bloco_ct(O_cam, D_cam, prim):
-  M_inv = prim.M_inv
-  O_w = np.einsum('ij,...j->...i', M_inv[:3, :3], O_cam) + M_inv[:3, 3]
-  D_w = np.einsum('ij,...j->...i', M_inv[:3, :3], D_cam)
-
-  d = prim.dados
-  cx, cz, R = d['cx'], d['cz'], d['raio']
-  x_min, x_max = d['x_min'], d['x_max']
-  z_min, z_max = d['z_min'], d['z_max']
-  H = d['altura']
-
-  shape = D_cam.shape[:-1]
-  t_best = np.full(shape, np.inf)
-  N_best = np.zeros_like(D_w)
-
-  ox, oy, oz = O_w[..., 0], O_w[..., 1], O_w[..., 2]
-  dx, dy, dz = D_w[..., 0], D_w[..., 1], D_w[..., 2]
-
-  def dentro_planta(px, pz):
-    in_box = (
-        (px >= x_min - 1e-4)
-        & (px <= x_max + 1e-4)
-        & (pz >= z_min - 1e-4)
-        & (pz <= z_max + 1e-4)
-    )
-    in_quad = (px < cx) & (pz < cz)
-    in_arc = ((px - cx) ** 2 + (pz - cz) ** 2) <= (R**2 + 1e-3)
-    return in_box & (~in_quad | in_arc)
-
-  m_top = np.abs(dy) > 1e-7
-  t_top = (H - oy) / np.where(m_top, dy, 1.0)
-  px, pz = ox + t_top * dx, oz + t_top * dz
-  v_top = m_top & (t_top > 1e-4) & dentro_planta(px, pz) & (t_top < t_best)
-  t_best = np.where(v_top, t_top, t_best)
-  N_top = np.zeros_like(N_best)
-  N_top[..., 1] = 1.0
-  N_best = np.where(v_top[..., None], N_top, N_best)
-
-  planos = [
-      ('z', z_min, -1.0, lambda x, z: (x >= cx - 1e-4) & (x <= x_max + 1e-4)),
-      ('x', x_min, -1.0, lambda x, z: (z >= cz - 1e-4) & (z <= z_max + 1e-4)),
-      ('x', x_max, 1.0, lambda x, z: (z >= z_min - 1e-4) & (z <= z_max + 1e-4)),
-      ('z', z_max, 1.0, lambda x, z: (x >= x_min - 1e-4) & (x <= x_max + 1e-4)),
-  ]
-  for eixo_p, val_p, s_norm, cond_fn in planos:
-    if eixo_p == 'z':
-      mp = np.abs(dz) > 1e-7
-      tp = (val_p - oz) / np.where(mp, dz, 1.0)
-    else:
-      mp = np.abs(dx) > 1e-7
-      tp = (val_p - ox) / np.where(mp, dx, 1.0)
-    hx, hy, hz = ox + tp * dx, oy + tp * dy, oz + tp * dz
-    vp = (
-        mp
-        & (tp > 1e-4)
-        & (hy >= 0.0)
-        & (hy <= H)
-        & cond_fn(hx, hz)
-        & (tp < t_best)
-    )
-    t_best = np.where(vp, tp, t_best)
-    Np = np.zeros_like(N_best)
-    if eixo_p == 'z':
-      Np[..., 2] = s_norm
-    else:
-      Np[..., 0] = s_norm
-    N_best = np.where(vp[..., None], Np, N_best)
-
-  rx0, rz0 = ox - cx, oz - cz
-  a = dx**2 + dz**2
-  b = 2.0 * (rx0 * dx + rz0 * dz)
-  c = rx0**2 + rz0**2 - R**2
-  delta = b**2 - 4.0 * a * c
-  mc = (delta >= 0) & (a > 1e-8)
-  sq = np.sqrt(np.maximum(delta, 0.0))
-
-  for tc in [
-      (-b - sq) / (2.0 * np.where(mc, a, 1.0)),
-      (-b + sq) / (2.0 * np.where(mc, a, 1.0)),
-  ]:
-    hx, hy, hz = ox + tc * dx, oy + tc * dy, oz + tc * dz
-    vc = (
-        mc
-        & (tc > 1e-4)
-        & (hy >= 0.0)
-        & (hy <= H)
-        & (hx <= cx + 1e-3)
-        & (hz <= cz + 1e-3)
-        & (tc < t_best)
-    )
-    if np.any(vc):
-      t_best = np.where(vc, tc, t_best)
-      Nc = np.stack(
-          [(hx - cx) / R, np.zeros_like(tc), (hz - cz) / R], axis=-1
-      )
-      N_best = np.where(vc[..., None], Nc, N_best)
-
-  P_hit = (
-      O_w + np.where(np.isfinite(t_best)[..., None], t_best[..., None], 0.0) * D_w
-  )
-  px, py, pz = P_hit[..., 0], P_hit[..., 1], P_hit[..., 2]
-
-  ang = np.arctan2(cz - pz, cx - px)
-  s_arco = np.clip(ang / (np.pi / 2.0), 0.0, 1.0)
-  na_fachada_arco = (px <= cx + 0.05) & (pz <= cz + 0.05) & (py < H - 0.05)
-
-  na_porta = (
-      na_fachada_arco & (s_arco >= 0.06) & (s_arco <= 0.20) & (py <= 2.75)
-  )
-  borda_porta = na_porta & (
-      (s_arco < 0.07) | (s_arco > 0.19) | (py > 2.63)
-  )
-
-  s_rel = (s_arco - 0.24) / (0.96 - 0.24)
-  idx_jan = np.floor(s_rel * 9.0)
-  frac_jan = (s_rel * 9.0) - idx_jan
-  na_janela = (
-      na_fachada_arco
-      & (idx_jan >= 0)
-      & (idx_jan < 9)
-      & (frac_jan >= 0.16)
-      & (frac_jan <= 0.84)
-      & (py >= 1.35)
-      & (py <= 3.25)
-  )
-  borda_janela = na_janela & (
-      (frac_jan < 0.22) | (frac_jan > 0.78) | (py < 1.45) | (py > 3.15)
-  )
-
-  na_placa_734 = (
-      na_fachada_arco
-      & (s_arco >= 0.05)
-      & (s_arco <= 0.23)
-      & (py >= 5.15)
-      & (py <= 6.30)
-  )
-
-  sub_mat = np.where(na_porta | na_janela, 1, 0)
-  sub_mat = np.where(borda_porta | borda_janela, 3, sub_mat)
-  sub_mat = np.where(na_placa_734, 2, sub_mat)
-
-  N_cam = np.einsum('ij,...j->...i', prim.M_inv_T[:3, :3], N_best)
-  N_cam /= np.where(
-      np.linalg.norm(N_cam, axis=-1, keepdims=True) > 1e-12,
-      np.linalg.norm(N_cam, axis=-1, keepdims=True),
-      1.0,
-  )
-
-  return t_best, N_cam, P_hit, sub_mat, N_best
-
-
-# ==============================================================================
-# 5. INTERSEÇÃO GERAL DAS PRIMITIVAS COM FILTRO BOUNDING BOX
-# ==============================================================================
-def intersect_primitiva(O_cam, D_cam, prim, t_atual_min=np.inf):
-  shape = D_cam.shape[:-1]
-
-  if prim.aabb_cam is not None:
-    if not np.any(
-        testar_aabb(
-            O_cam, D_cam, prim.aabb_cam[0], prim.aabb_cam[1], t_atual_min
-        )
-    ):
-      return (
-          np.full(shape, np.inf),
-          np.zeros_like(D_cam),
-          np.zeros_like(D_cam),
-          np.zeros(shape, dtype=int),
-          np.zeros_like(D_cam),
-      )
-
-  if prim.tipo == 'bloco_ct_arqueado':
-    return intersect_bloco_ct(O_cam, D_cam, prim)
-
-  if prim.tipo == 'malha':
-    verts = prim.verts_cam
-    faces = prim.dados['faces']
-    t_best = np.full(shape, np.inf)
-    N_best = np.zeros_like(D_cam)
-
-    mask_box = testar_aabb(
-        O_cam, D_cam, prim.aabb_cam[0], prim.aabb_cam[1], t_atual_min
-    )
-    if not np.any(mask_box):
-      return (
-          t_best,
-          N_best,
-          np.zeros_like(D_cam),
-          np.zeros(shape, dtype=int),
-          N_best,
-      )
-
-    O_sub = O_cam[mask_box]
-    D_sub = D_cam[mask_box]
-    t_sub = np.full(O_sub.shape[:-1], np.inf)
-    N_sub = np.zeros_like(D_sub)
-
-    for f in faces:
-      v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
-      e1 = v1 - v0
-      e2 = v2 - v0
-      h = np.cross(D_sub, e2)
-      a = np.einsum('...i,i->...', h, e1)
-      mask_a = np.abs(a) > 1e-7
-      inv_a = 1.0 / np.where(mask_a, a, 1.0)
-      s = O_sub - v0
-      u = inv_a * np.einsum('...i,...i->...', s, h)
-      q = np.cross(s, e1)
-      v = inv_a * np.einsum('...i,...i->...', D_sub, q)
-      t = inv_a * np.einsum('...i,i->...', q, e2)
-
-      hit_f = (
-          mask_a
-          & (u >= 0.0)
-          & (v >= 0.0)
-          & (u + v <= 1.0)
-          & (t > 1e-4)
-          & (t < t_sub)
-      )
-      if np.any(hit_f):
-        t_sub = np.where(hit_f, t, t_sub)
-        nf = np.cross(e1, e2)
-        nlen_f = np.linalg.norm(nf)
-        if nlen_f > 1e-12:
-          nf /= nlen_f
-        N_sub = np.where(hit_f[..., None], nf, N_sub)
-
-    t_best[mask_box] = t_sub
-    N_best[mask_box] = N_sub
-
-    M_inv = prim.M_inv
-    P_w = (
-        np.einsum(
-            'ij,...j->...i',
-            M_inv[:3, :3],
-            O_cam
-            + np.where(np.isfinite(t_best)[..., None], t_best[..., None], 0.0)
-            * D_cam,
-        )
-        + M_inv[:3, 3]
-    )
-    M_w_inv_T = np.linalg.inv(prim.M).T
-    N_w = np.einsum(
-        'ij,...j->...i',
-        M_w_inv_T[:3, :3],
-        np.einsum('ij,...j->...i', prim.M_total[:3, :3], N_best),
-    )
-    nw_l = np.linalg.norm(N_w, axis=-1, keepdims=True)
-    N_w /= np.where(nw_l > 1e-12, nw_l, 1.0)
-    return t_best, N_best, P_w, np.zeros(shape, dtype=int), N_w
-
-  M_inv = prim.M_inv
-  O_loc = np.einsum('ij,...j->...i', M_inv[:3, :3], O_cam) + M_inv[:3, 3]
-  D_loc = np.einsum('ij,...j->...i', M_inv[:3, :3], D_cam)
-
-  t_hit = np.full(shape, np.inf)
-  N_loc = np.zeros_like(D_loc)
-
-  if prim.tipo == 'cubo':
-    invD = 1.0 / np.where(np.abs(D_loc) > 1e-8, D_loc, 1e-8)
-    t1 = (-0.5 - O_loc) * invD
-    t2 = (0.5 - O_loc) * invD
-    tmin = np.max(np.minimum(t1, t2), axis=-1)
-    tmax = np.min(np.maximum(t1, t2), axis=-1)
-    valid = (tmax >= tmin) & (tmax > 1e-4)
-    t_hit = np.where(valid, np.where(tmin > 1e-4, tmin, tmax), np.inf)
-    P_loc = O_loc + t_hit[..., None] * D_loc
-    max_ax = np.argmax(np.abs(P_loc), axis=-1)
-    for ax in range(3):
-      N_loc[..., ax] = np.where(max_ax == ax, np.sign(P_loc[..., ax]), 0.0)
-
-  elif prim.tipo == 'esfera':
-    a = np.einsum('...i,...i->...', D_loc, D_loc)
-    b = 2.0 * np.einsum('...i,...i->...', D_loc, O_loc)
-    c = np.einsum('...i,...i->...', O_loc, O_loc) - 1.0
-    delta = b**2 - 4.0 * a * c
-    mask = delta >= 0
-    sq = np.sqrt(np.maximum(delta, 0.0))
-    t1 = (-b - sq) / (2.0 * a)
-    t2 = (-b + sq) / (2.0 * a)
-    t_val = np.where(t1 > 1e-4, t1, np.where(t2 > 1e-4, t2, np.inf))
-    t_hit = np.where(mask, t_val, np.inf)
-    N_loc = O_loc + t_hit[..., None] * D_loc
-
-  elif prim.tipo == 'cilindro':
-    ox, oy, oz = O_loc[..., 0], O_loc[..., 1], O_loc[..., 2]
-    dx, dy, dz = D_loc[..., 0], D_loc[..., 1], D_loc[..., 2]
-    a = dx**2 + dz**2
-    b = 2.0 * (ox * dx + oz * dz)
-    c = ox**2 + oz**2 - 1.0
-    delta = b**2 - 4.0 * a * c
-    mask = (delta >= 0) & (a > 1e-8)
-    sq = np.sqrt(np.maximum(delta, 0.0))
-    for tc in [
-        (-b - sq) / (2.0 * np.where(mask, a, 1.0)),
-        (-b + sq) / (2.0 * np.where(mask, a, 1.0)),
-    ]:
-      yh = oy + tc * dy
-      v = mask & (tc > 1e-4) & (yh >= 0.0) & (yh <= 1.0) & (tc < t_hit)
-      t_hit = np.where(v, tc, t_hit)
-    P_loc = O_loc + t_hit[..., None] * D_loc
-    N_loc = np.stack(
-        [P_loc[..., 0], np.zeros_like(t_hit), P_loc[..., 2]], axis=-1
-    )
-    for yt, ny in [(0.0, -1.0), (1.0, 1.0)]:
-      mt = np.abs(dy) > 1e-6
-      tt = (yt - oy) / np.where(mt, dy, 1.0)
-      xh, zh = ox + tt * dx, oz + tt * dz
-      vt = mt & (tt > 1e-4) & ((xh**2 + zh**2) <= 1.0) & (tt < t_hit)
-      t_hit = np.where(vt, tt, t_hit)
-      Nt = np.zeros_like(N_loc)
-      Nt[..., 1] = ny
-      N_loc = np.where(vt[..., None], Nt, N_loc)
-
-  elif prim.tipo == 'cone':
-    ox, oy, oz = O_loc[..., 0], O_loc[..., 1] - 1.0, O_loc[..., 2]
-    dx, dy, dz = D_loc[..., 0], D_loc[..., 1], D_loc[..., 2]
-    a = dx**2 + dz**2 - dy**2
-    b = 2.0 * (ox * dx + oz * dz - oy * dy)
-    c = ox**2 + oz**2 - oy**2
-    delta = b**2 - 4.0 * a * c
-    mask = (delta >= 0) & (np.abs(a) > 1e-8)
-    sq = np.sqrt(np.maximum(delta, 0.0))
-    for tc in [
-        (-b - sq) / (2.0 * np.where(mask, a, 1.0)),
-        (-b + sq) / (2.0 * np.where(mask, a, 1.0)),
-    ]:
-      yh = O_loc[..., 1] + tc * dy
-      v = mask & (tc > 1e-4) & (yh >= 0.0) & (yh <= 1.0) & (tc < t_hit)
-      t_hit = np.where(v, tc, t_hit)
-    P_loc = O_loc + t_hit[..., None] * D_loc
-    N_loc = np.stack(
-        [P_loc[..., 0], 1.0 - P_loc[..., 1], P_loc[..., 2]], axis=-1
-    )
-    mb = np.abs(dy) > 1e-6
-    tb = -O_loc[..., 1] / np.where(mb, dy, 1.0)
-    xb, zb = ox + tb * dx, oz + tb * dz
-    vb = mb & (tb > 1e-4) & ((xb**2 + zb**2) <= 1.0) & (tb < t_hit)
-    t_hit = np.where(vb, tb, t_hit)
-    Nb = np.zeros_like(N_loc)
-    Nb[..., 1] = -1.0
-    N_loc = np.where(vb[..., None], Nb, N_loc)
-
-  P_loc_hit = (
-      O_loc
-      + np.where(np.isfinite(t_hit)[..., None], t_hit[..., None], 0.0) * D_loc
-  )
-  P_world = np.einsum('ij,...j->...i', prim.M[:3, :3], P_loc_hit) + prim.M[:3, 3]
-
-  M_w_inv_T = np.linalg.inv(prim.M).T
-  N_world = np.einsum('ij,...j->...i', M_w_inv_T[:3, :3], N_loc)
-  nw_len = np.linalg.norm(N_world, axis=-1, keepdims=True)
-  N_world /= np.where(nw_len > 1e-12, nw_len, 1.0)
-
-  N_cam = np.einsum('ij,...j->...i', prim.M_inv_T[:3, :3], N_loc)
-  nlen = np.linalg.norm(N_cam, axis=-1, keepdims=True)
-  N_cam /= np.where(nlen > 1e-12, nlen, 1.0)
-
-  return t_hit, N_cam, P_world, np.zeros(shape, dtype=int), N_world
-
-
-# ==============================================================================
-# 6. MONTAGEM DO CENÁRIO: BLOCO 734 + ESCULTURA + FONTE + ELEMENTOS ESTILO ROBLOX
-# ==============================================================================
-def montar_cenario():
-  mat_alvenaria_branca = Material(
-      'Alvenaria Branca (Bloco 734)',
-      (0.92, 0.93, 0.94),
-      (0.25, 0.25, 0.25),
-      (0.85, 0.85, 0.88),
-      brilho=16.0,
-  )
-  mat_aco_branco = Material(
-      'Aço Pintura Branca (Escultura Cinética)',
-      (0.96, 0.97, 0.98),
-      (0.65, 0.68, 0.72),
-      (0.90, 0.91, 0.93),
-      brilho=64.0,
-      refletividade=0.14,
-  )
-  mat_concreto_base = Material(
-      'Concreto Aparente (Base Escultura)',
-      (0.52, 0.53, 0.55),
-      (0.12, 0.12, 0.12),
-      (0.45, 0.46, 0.48),
-      brilho=12.0,
-  )
-  mat_vidro_fume = Material(
-      'Vidro Fumê Refletivo',
-      (0.04, 0.05, 0.06),
-      (0.95, 0.95, 0.98),
-      (0.03, 0.03, 0.04),
-      brilho=128.0,
-      refletividade=0.55,
-  )
-  mat_esquadria = Material(
-      'Esquadria Alumínio Escuro',
-      (0.12, 0.13, 0.15),
-      (0.50, 0.50, 0.55),
-      (0.10, 0.10, 0.12),
-      brilho=48.0,
-  )
-  mat_placa_734 = Material(
-      'Platibanda Nº 734',
-      (0.92, 0.93, 0.94),
-      (0.25, 0.25, 0.25),
-      (0.85, 0.85, 0.88),
-      brilho=16.0,
-      textura='placa_734',
-  )
-  mat_asfalto = Material(
-      'Pavimento Asfáltico (CBUQ)',
-      (0.22, 0.22, 0.24),
-      (0.08, 0.08, 0.08),
-      (0.18, 0.18, 0.20),
-      brilho=8.0,
-      textura='asfalto',
-  )
-  mat_calcada = Material(
-      'Calçada de Concreto',
-      (0.68, 0.67, 0.65),
-      (0.10, 0.10, 0.10),
-      (0.60, 0.60, 0.58),
-      brilho=10.0,
-      textura='calcada',
-  )
-  mat_tronco = Material(
-      'Casca de Árvore',
-      (0.36, 0.22, 0.11),
-      (0.05, 0.05, 0.05),
-      (0.30, 0.18, 0.09),
-      brilho=8.0,
-  )
-  mat_folha_1 = Material(
-      'Folhagem Verde Escuro',
-      (0.08, 0.34, 0.12),
-      (0.12, 0.18, 0.12),
-      (0.07, 0.28, 0.10),
-      brilho=14.0,
-  )
-  mat_folha_2 = Material(
-      'Folhagem Verde Médio',
-      (0.14, 0.48, 0.18),
-      (0.15, 0.22, 0.15),
-      (0.12, 0.40, 0.15),
-      brilho=16.0,
-  )
-  mat_folha_3 = Material(
-      'Folhagem Verde Claro',
-      (0.22, 0.60, 0.24),
-      (0.18, 0.25, 0.18),
-      (0.18, 0.50, 0.20),
-      brilho=18.0,
-  )
-  mat_cone_laranja = Material(
-      'Cone Sinalização Viária',
-      (0.95, 0.35, 0.04),
-      (0.45, 0.40, 0.35),
-      (0.85, 0.30, 0.04),
-      brilho=36.0,
-  )
-  mat_metal_galv = Material(
-      'Aço Galvanizado (Cobertura)',
-      (0.58, 0.62, 0.66),
-      (0.85, 0.88, 0.90),
-      (0.50, 0.54, 0.58),
-      brilho=80.0,
-      refletividade=0.25,
-  )
-  mat_agua_fonte = Material(
-      "Água Espelho d'Água (Refração n=1.333)",
-      (0.12, 0.48, 0.62),
-      (0.95, 0.98, 1.00),
-      (0.08, 0.32, 0.42),
-      brilho=140.0,
-      refletividade=0.42,
-      textura='agua_fonte',
-  )
-  mat_borda_fonte = Material(
-      'Borda Granito Escuro (Fonte)',
-      (0.22, 0.24, 0.27),
-      (0.30, 0.32, 0.35),
-      (0.18, 0.20, 0.22),
-      brilho=36.0,
-  )
-  mat_spot_submerso = Material(
-      'Spot Submerso LED (Fonte)',
-      (0.75, 0.96, 1.00),
-      (1.00, 1.00, 1.00),
-      (0.70, 0.95, 1.00),
-      brilho=160.0,
-  )
-
-  # Materiais dos novos elementos leves (Carros, Personagens, Mesas, Café)
-  mat_suv = Material(
-      'Pintura Automotiva Prata (SUV)',
-      (0.74, 0.77, 0.80),
-      (0.85, 0.88, 0.90),
-      (0.62, 0.65, 0.68),
-      brilho=96.0,
-      refletividade=0.26,
-  )
-  mat_esportivo = Material(
-      'Pintura Automotiva Vermelha (Esportivo)',
-      (0.84, 0.12, 0.14),
-      (0.88, 0.85, 0.85),
-      (0.70, 0.10, 0.12),
-      brilho=110.0,
-      refletividade=0.28,
-  )
-  mat_pneu = Material(
-      'Borracha Pneu',
-      (0.08, 0.08, 0.09),
-      (0.12, 0.12, 0.12),
-      (0.06, 0.06, 0.07),
-      brilho=10.0,
-  )
-  mat_farol = Material(
-      'Farol LED Automotivo',
-      (1.00, 0.98, 0.85),
-      (1.00, 1.00, 1.00),
-      (0.95, 0.92, 0.78),
-      brilho=150.0,
-  )
-  mat_lanterna = Material(
-      'Lanterna Traseira LED',
-      (0.95, 0.12, 0.10),
-      (1.00, 0.35, 0.35),
-      (0.85, 0.10, 0.10),
-      brilho=120.0,
-  )
-  mat_pele = Material(
-      'Polímero Amarelo (Avatar)',
-      (0.98, 0.82, 0.25),
-      (0.25, 0.25, 0.25),
-      (0.85, 0.70, 0.20),
-      brilho=24.0,
-  )
-  mat_camisa_azul = Material(
-      'Tecido Azul (Estudante)',
-      (0.15, 0.38, 0.78),
-      (0.18, 0.18, 0.22),
-      (0.12, 0.30, 0.65),
-      brilho=16.0,
-  )
-  mat_vestido_laranja = Material(
-      'Tecido Âmbar (Estudante)',
-      (0.82, 0.45, 0.16),
-      (0.18, 0.18, 0.22),
-      (0.68, 0.36, 0.14),
-      brilho=16.0,
-  )
-  mat_calca_escura = Material(
-      'Jeans Escuro',
-      (0.12, 0.16, 0.24),
-      (0.10, 0.10, 0.12),
-      (0.10, 0.13, 0.20),
-      brilho=12.0,
-  )
-  mat_npc_sombrio = Material(
-      'Traje Sombrio (NPC Misterioso)',
-      (0.06, 0.07, 0.10),
-      (0.15, 0.15, 0.20),
-      (0.05, 0.05, 0.08),
-      brilho=20.0,
-  )
-  mat_madeira = Material(
-      'Madeira Laminada (Bancadas)',
-      (0.56, 0.38, 0.22),
-      (0.20, 0.18, 0.15),
-      (0.46, 0.30, 0.18),
-      brilho=22.0,
-  )
-  mat_tela_pc = Material(
-      'Tela Monitor LCD',
-      (0.10, 0.45, 0.78),
-      (0.85, 0.92, 1.00),
-      (0.12, 0.48, 0.82),
-      brilho=120.0,
-  )
-  mat_papel = Material(
-      'Papel / Cerâmica Branca',
-      (0.95, 0.95, 0.96),
-      (0.35, 0.35, 0.35),
-      (0.88, 0.88, 0.90),
-      brilho=32.0,
-  )
-  mat_cafe_corpo = Material(
-      'Aço Inox Escovado (Cafeteira)',
-      (0.24, 0.26, 0.30),
-      (0.75, 0.78, 0.82),
-      (0.20, 0.22, 0.25),
-      brilho=90.0,
-      refletividade=0.22,
-  )
-  mat_led_cafe = Material(
-      'LED Verde Cafeteira',
-      (0.15, 0.95, 0.35),
-      (1.00, 1.00, 1.00),
-      (0.15, 0.90, 0.35),
-      brilho=150.0,
-  )
-  mat_ave_penas = Material(
-      'Plumagem Índigo (Ave Predadora)',
-      (0.16, 0.14, 0.38),
-      (0.25, 0.25, 0.40),
-      (0.12, 0.10, 0.30),
-      brilho=28.0,
-  )
-
-  materiais_bloco = {
-      0: mat_alvenaria_branca,
-      1: mat_vidro_fume,
-      2: mat_placa_734,
-      3: mat_esquadria,
-  }
-
-  cena = []
-
-  M_via = mat_translacao(35.0, 0.05, 9.0) @ mat_escala(66.0, 0.10, 14.0)
-  cena.append(
-      Primitiva(
-          'Via Asfáltica CT',
-          'cubo',
-          M_via,
-          mat_asfalto,
-          grupo_ar='Via Asfáltica CT',
-          descricao_ar=(
-              'Pavimento asfáltico CBUQ do Centro de Tecnologia com textura '
-              'procedural granular e faixas de sinalização.'
-          ),
-          transformacao_desc='Translação(35, 0.05, 9) · Escala(66, 0.1, 14)',
-      )
-  )
-
-  M_calc = mat_translacao(35.0, 0.10, 38.0) @ mat_escala(66.0, 0.20, 44.0)
-  cena.append(
-      Primitiva(
-          'Calçada Bloco 734',
-          'cubo',
-          M_calc,
-          mat_calcada,
-          grupo_ar='Calçada Bloco 734',
-          descricao_ar=(
-              'Passeio frontal em placas de concreto com rejunte procedural '
-              'a cada 1.5m.'
-          ),
-          transformacao_desc='Translação(35, 0.10, 38) · Escala(66, 0.2, 44)',
-      )
-  )
-
-  dados_bloco = construir_geometria_bloco_ct()
-  cena.append(
-      Primitiva(
-          'Bloco 734 (CT/Asfalto)',
-          'bloco_ct_arqueado',
-          mat_identidade(),
-          mat_alvenaria_branca,
-          dados_extra=dados_bloco,
-          grupo_ar='Bloco 734 (CT/Asfalto)',
-          descricao_ar=(
-              'Edificação principal (33m x 44m, H=6.6m) com fachada arqueada '
-              'tangencial de raio R=22m, janelas em vidro fumê e platibanda nº 734.'
-          ),
-          transformacao_desc='CSG Analítico (Prisma + Cilindro R=22m)',
-      )
-  )
-
-  # --- ESPELHO D'ÁGUA / FONTE FRONTAL ---
-  fx_min, fx_max = 19.5, 34.5
-  fz_min, fz_max = 16.8, 22.8
-  f_cx, f_cz = 0.5 * (fx_min + fx_max), 0.5 * (fz_min + fz_max)
-  f_larg, f_prof = fx_max - fx_min, fz_max - fz_min
-  y_agua = 0.42
-
-  esp_borda = 0.28
-  alt_borda = 0.34
-  y_centro_borda = 0.20 + alt_borda * 0.5
-  bordas_fonte = [
-      (
-          'Borda Frontal Fonte',
-          mat_translacao(f_cx, y_centro_borda, fz_min)
-          @ mat_escala(f_larg + esp_borda, alt_borda, esp_borda),
-      ),
-      (
-          'Borda Traseira Fonte',
-          mat_translacao(f_cx, y_centro_borda, fz_max)
-          @ mat_escala(f_larg + esp_borda, alt_borda, esp_borda),
-      ),
-      (
-          'Borda Esq. Fonte',
-          mat_translacao(fx_min, y_centro_borda, f_cz)
-          @ mat_escala(esp_borda, alt_borda, f_prof),
-      ),
-      (
-          'Borda Dir. Fonte',
-          mat_translacao(fx_max, y_centro_borda, f_cz)
-          @ mat_escala(esp_borda, alt_borda, f_prof),
-      ),
-  ]
-  for nome_b, M_b in bordas_fonte:
-    cena.append(
-        Primitiva(
-            nome_b,
-            'cubo',
-            M_b,
-            mat_borda_fonte,
-            grupo_ar="Espelho d'Água (Fonte Cáustica)",
-            descricao_ar='Mureta de contenção em granito escuro da fonte.',
-        )
-    )
-
-  M_agua = mat_translacao(f_cx, y_agua - 0.04, f_cz) @ mat_escala(
-      f_larg - 0.15, 0.08, f_prof - 0.15
-  )
-  cena.append(
-      Primitiva(
-          "Espelho d'Água (Fonte Cáustica)",
-          'cubo',
-          M_agua,
-          mat_agua_fonte,
-          grupo_ar="Espelho d'Água (Fonte Cáustica)",
-          descricao_ar=(
-              "Lâmina d'água com índice de refração n=1.333 e spots submersos "
-              'que projetam cáusticas ondulatórias na fachada curva.'
-          ),
-      )
-  )
-
-  spots_submersos = []
-  for idx_sp, sx in enumerate([22.0, 27.0, 32.0], start=1):
-    sy = 0.32
-    sz = fz_min + 0.32
-    alvo_sp = np.array([sx + 2.5, 3.6, 28.0])
-    dir_sp = alvo_sp - np.array([sx, sy, sz])
-    dir_sp /= np.linalg.norm(dir_sp)
-    spots_submersos.append((np.array([sx, sy, sz]), dir_sp))
-
-    M_sp = mat_translacao(sx, sy, sz) @ mat_escala(0.18, 0.14, 0.18)
-    cena.append(
-        Primitiva(
-            f'Spot Submerso Fonte {idx_sp}',
-            'esfera',
-            M_sp,
-            mat_spot_submerso,
-            grupo_ar="Espelho d'Água (Fonte Cáustica)",
-            descricao_ar='Refletor submerso LED responsável pelos filamentos de cáustica.',
-        )
-    )
-
-  fonte_info = {
-      'x_min': fx_min,
-      'x_max': fx_max,
-      'z_min': fz_min,
-      'z_max': fz_max,
-      'y_agua': y_agua,
-      'spots_submersos': spots_submersos,
-  }
-
-  # --- ESCULTURA CINÉTICA EM AÇO ---
-  dados_escultura = gerar_parametros_escultura_cinetica(
-      origem_base=(15.0, 0.2, 22.0)
-  )
-  desc_esc = (
-      'Escultura cinética paramétrica com 5 quadros metálicos rotacionados a '
-      '45°, escalonados progressivamente e orientados a -24° no eixo Y.'
-  )
-  cena.append(
-      Primitiva(
-          'Base Concreto (Escultura Cinética)',
-          'cubo',
-          dados_escultura['M_base'],
-          mat_concreto_base,
-          grupo_ar='Escultura Cinética em Aço',
-          descricao_ar=desc_esc,
-      )
-  )
-
-  for q in dados_escultura['quadros']:
-    idx_q = q['indice']
-    for b_idx, M_barra in enumerate(q['barras_M']):
-      cena.append(
-          Primitiva(
-              f'Escultura Cinética - Losango {idx_q} (Perfil {b_idx+1})',
-              'cubo',
-              M_barra,
-              mat_aco_branco,
-              grupo_ar='Escultura Cinética em Aço',
-              descricao_ar=desc_esc,
-          )
-      )
-    cena.append(
-        Primitiva(
-            f'Escultura Cinética - Losango {idx_q} (Sapata)',
-            'cubo',
-            q['haste_M'],
-            mat_aco_branco,
-            grupo_ar='Escultura Cinética em Aço',
-            descricao_ar=desc_esc,
-        )
-    )
-
-  # --- ESCADA EXTERNA DE ACESSO AO TELHADO ---
-  M_escada = mat_translacao(59.35, 3.4, 24.0) @ mat_escala(0.55, 6.6, 1.1)
-  cena.append(
-      Primitiva(
-          'Escada Acesso Telhado',
-          'cubo',
-          M_escada,
-          mat_esquadria,
-          grupo_ar='Escada Acesso Telhado',
-          descricao_ar=(
-              'Escada marinheiro lateral (X=59.35m, Z=24.0m) que dá acesso à '
-              'cobertura do Bloco 734 (Y=6.8m).'
-          ),
-      )
-  )
-
-  # --- ÁRVORES NO ENTORNO ---
-  arvores_cfg = [
-      ('Árvore Bosque Esq.', 10.5, 28.5, 1.15),
-      ('Árvore Fundo Esq.', 11.5, 38.0, 1.25),
-      ('Árvore Praça Dir.', 37.5, 17.5, 0.90),
-  ]
-  esferas_copa_rel = [
-      ((0.0, 3.6, 0.0), 1.65, mat_folha_1),
-      ((-1.1, 3.2, 0.6), 1.25, mat_folha_2),
-      ((1.1, 3.3, -0.5), 1.30, mat_folha_2),
-      ((0.3, 4.5, 0.4), 1.20, mat_folha_3),
-      ((-0.7, 4.1, -0.7), 1.15, mat_folha_3),
-      ((0.8, 2.9, 0.8), 1.10, mat_folha_1),
-  ]
-  arvores_3d_info = []
-  for nome_arv, tx_arv, tz_arv, esc_arv in arvores_cfg:
-    alt_t = 3.2 * esc_arv
-    desc_arv = (
-        f'{nome_arv}: tronco cilíndrico e copa composta por 6 esferas '
-        'rotacionadas via quatérnios.'
-    )
-    M_tronco = mat_translacao(tx_arv, 0.2, tz_arv) @ mat_escala(
-        0.42 * esc_arv, alt_t, 0.42 * esc_arv
-    )
-    cena.append(
-        Primitiva(
-            f'Tronco {nome_arv}',
-            'cilindro',
-            M_tronco,
-            mat_tronco,
-            grupo_ar=nome_arv,
-            descricao_ar=desc_arv,
-        )
-    )
-    esfs_3d = []
-    for idx_e, (off, r_esf, mat_f) in enumerate(esferas_copa_rel):
-      M_rot_q = mat_rotacao_eixo_arbitrario_quaternion(
-          (1.0, 0.5, 0.3), idx_e * 0.4, (tx_arv, 3.5 * esc_arv, tz_arv)
-      )
-      px_e = tx_arv + off[0] * esc_arv
-      py_e = off[1] * esc_arv
-      pz_e = tz_arv + off[2] * esc_arv
-      r_final = r_esf * esc_arv
-      M_esf = (
-          M_rot_q
-          @ mat_translacao(px_e, py_e, pz_e)
-          @ mat_escala(r_final, r_final, r_final)
-      )
-      cena.append(
-          Primitiva(
-              f'Copa {nome_arv} ({idx_e+1})',
-              'esfera',
-              M_esf,
-              mat_f,
-              grupo_ar=nome_arv,
-              descricao_ar=desc_arv,
-          )
-      )
-      if idx_e < 4:
-        esfs_3d.append((
-            px_e,
-            py_e,
-            pz_e,
-            r_final,
-            '#16A34A' if idx_e % 2 == 0 else '#15803D',
-        ))
-    arvores_3d_info.append(
-        {'x': tx_arv, 'z': tz_arv, 'alt': alt_t, 'esferas': esfs_3d}
-    )
-
-  # --- AVE PREDADORA NA ÁRVORE DO FUNDO (X=11.5, Z=38.0) ---
-  M_ave_corpo = (
-      mat_translacao(11.5, 5.2, 38.0)
-      @ mat_rotacao_x(np.deg2rad(90.0))
-      @ mat_escala(0.32, 1.1, 0.32)
-  )
-  cena.append(
-      Primitiva(
-          'Ave Predadora (Corpo)',
-          'cone',
-          M_ave_corpo,
-          mat_ave_penas,
-          grupo_ar='Ave Predadora da Árvore',
-          descricao_ar=(
-              'Ave territorial empoleirada na Árvore do Fundo (X=11.5, Z=38.0). '
-              'Ataca se o observador invadir sua zona de proximidade.'
-          ),
-      )
-  )
-  for ax_off, lado_a in [(-0.65, 'Esq.'), (0.65, 'Dir.')]:
-    M_asa = mat_translacao(11.5 + ax_off, 5.25, 38.4) @ mat_escala(
-        1.3, 0.08, 0.45
-    )
-    cena.append(
-        Primitiva(
-            f'Ave Predadora (Asa {lado_a})',
-            'cubo',
-            M_asa,
-            mat_ave_penas,
-            grupo_ar='Ave Predadora da Árvore',
-            descricao_ar='Asa da ave territorial modelada como cubo escalado.',
-        )
-    )
-
-  # --- CONES DE SINALIZAÇÃO (COM ESPELHO EM PLANO ARBITRÁRIO) ---
-  M_espelho = mat_espelho_plano_arbitrario((36.2, 0.0, 16.0), (0.8, 0.0, 0.6))
-  cones_base = [(35.3, 0.2, 16.2), (35.9, 0.2, 15.6)]
-  cones_3d_info = []
-  for i_c, (cx_c, cy_c, cz_c) in enumerate(cones_base):
-    M_cone = mat_translacao(cx_c, cy_c, cz_c) @ mat_escala(0.32, 0.95, 0.32)
-    M_cone_esp = M_espelho @ M_cone
-    cena.append(
-        Primitiva(
-            f'Cone Sinalização {i_c+1}',
-            'cone',
-            M_cone,
-            mat_cone_laranja,
-            grupo_ar='Cones de Sinalização Viária',
-            descricao_ar='Cone viário (primitiva Cone) posicionado na calçada.',
-        )
-    )
-    cena.append(
-        Primitiva(
-            f'Cone Espelhado {i_c+1}',
-            'cone',
-            M_cone_esp,
-            mat_cone_laranja,
-            grupo_ar='Cones de Sinalização Viária',
-            descricao_ar=(
-                'Cone gerado por reflexão especular em relação a um plano '
-                'arbitrário (Quest Bônus 6.2).'
-            ),
-            transformacao_desc='Reflexão em Plano Arbitrário (M_espelho)',
-        )
-    )
-    cones_3d_info.append((cx_c, cz_c))
-    cones_3d_info.append((M_cone_esp[0, 3], M_cone_esp[2, 3]))
-
-  # --- ABRIGO METÁLICO (MALHA POLIGONAL + CISALHAMENTO XY) ---
-  M_malha = (
-      mat_translacao(44.5, 0.2, 17.2)
-      @ mat_cisalhamento_xy(0.15)
-      @ mat_escala(4.5, 2.6, 3.2)
-  )
-  dados_m = criar_malha_cobertura_metalica(M_malha)
-  cena.append(
-      Primitiva(
-          'Abrigo Metálico (Malha)',
-          'malha',
-          M_malha,
-          mat_metal_galv,
-          dados_extra=dados_m,
-          grupo_ar='Abrigo Metálico (Malha)',
-          descricao_ar=(
-              'Cobertura metálica em malha de 12 triângulos transformada por '
-              'cisalhamento XY (Sh_xy = 0.15 — Quest Bônus 6.1).'
-          ),
-          transformacao_desc='Malha Poligonal + Cisalhamento XY (Sh_xy=0.15)',
-      )
-  )
-
-  for px_p, pz_p in [(44.7, 17.4), (48.8, 17.4), (44.7, 20.2), (48.8, 20.2)]:
-    M_pil = mat_translacao(px_p, 0.2, pz_p) @ mat_escala(0.12, 2.3, 0.12)
-    cena.append(
-        Primitiva(
-            'Pilar Abrigo Metálico',
-            'cilindro',
-            M_pil,
-            mat_esquadria,
-            grupo_ar='Abrigo Metálico (Malha)',
-            descricao_ar='Pilar cilíndrico de sustentação do abrigo metálico.',
-        )
-    )
-
-  # --- POSTES DE ILUMINAÇÃO PÚBLICA ---
-  postes_coords = [
-      (9.5, 21.0, 0.6),
-      (18.5, 16.2, 0.4),
-      (41.0, 16.5, 0.0),
-      (54.5, 17.5, -0.5),
-  ]
-  for idx_p, (px_pos, pz_pos, off_lum_x) in enumerate(postes_coords, start=1):
-    M_poste = mat_translacao(px_pos, 0.2, pz_pos) @ mat_escala(0.14, 6.2, 0.14)
-    cena.append(
-        Primitiva(
-            f'Poste Iluminação {idx_p}',
-            'cilindro',
-            M_poste,
-            mat_esquadria,
-            grupo_ar=f'Poste de Iluminação #{idx_p}',
-            descricao_ar=(
-                'Poste metálico com fonte de luz pontual e atenuação quadrática '
-                '1 / (1 + 0.008·d²).'
-            ),
-        )
-    )
-    M_lum = mat_translacao(px_pos + off_lum_x, 6.3, pz_pos + 0.4) @ mat_escala(
-        0.35, 0.24, 0.35
-    )
-    cena.append(
-        Primitiva(
-            f'Luminária Poste {idx_p}',
-            'esfera',
-            M_lum,
-            mat_alvenaria_branca,
-            grupo_ar=f'Poste de Iluminação #{idx_p}',
-            descricao_ar='Luminária esférica emissiva no topo do poste.',
-        )
-    )
-
-  # --- ELEMENTOS LEVES PUROS ESTILO ROBLOX (CARROS, ESTUDANTES, NPC, PALMEIRA, MESAS E CAFÉ) ---
-  construir_veiculo_roblox(
-      cena,
-      'SUV Prata na Via CT',
-      (23.0, 0.10, 7.2),
-      90.0,
-      mat_suv,
-      mat_vidro_fume,
-      mat_pneu,
-      mat_farol,
-      mat_lanterna,
-      'Veículo utilitário modelado com primitivas puras (cubos, cilindros e esferas).',
-  )
-  construir_veiculo_roblox(
-      cena,
-      'Carro Esportivo Vermelho',
-      (39.0, 0.10, 10.6),
-      -90.0,
-      mat_esportivo,
-      mat_vidro_fume,
-      mat_pneu,
-      mat_farol,
-      mat_lanterna,
-      'Veículo esportivo modelado com primitivas puras sem malha pesada.',
-  )
-
-  construir_personagem_roblox(
-      cena,
-      'Estudante Casual',
-      (18.6, 0.20, 18.8),
-      -35.0,
-      mat_camisa_azul,
-      mat_pele,
-      mat_calca_escura,
-      'Estudante de Engenharia observando a Escultura Cinética e o Espelho d’Água.',
-      escala_unif=0.95,
-  )
-  construir_personagem_roblox(
-      cena,
-      'Estudante Vestido',
-      (19.6, 0.20, 18.2),
-      -55.0,
-      mat_vestido_laranja,
-      mat_pele,
-      mat_calca_escura,
-      'Estudante na praça frontal do Bloco 734.',
-      escala_unif=0.92,
-  )
-  construir_personagem_roblox(
-      cena,
-      'NPC Misterioso Parado',
-      (43.0, 0.20, 19.5),
-      180.0,
-      mat_npc_sombrio,
-      mat_papel,
-      mat_npc_sombrio,
-      'Figura misteriosa imóvel próxima à praça lateral. Evite se aproximar!',
-      escala_unif=1.02,
-  )
-
-  construir_palmeira_estilizada(
-      cena, (42.5, 0.20, 17.5), mat_tronco, mat_folha_2
-  )
-
-  construir_mesas_trabalho_e_cafe(
-      cena,
-      mat_madeira,
-      mat_esquadria,
-      mat_tela_pc,
-      mat_papel,
-      mat_cafe_corpo,
-      mat_led_cafe,
-  )
-
-  extras_3d = {
-      'arvores': arvores_3d_info,
-      'postes': postes_coords,
-      'cones': cones_3d_info,
-      'fonte': fonte_info,
-  }
-  return cena, materiais_bloco, dados_escultura, extras_3d
-
-
-# ==============================================================================
-# 7. MOTOR DE RENDERIZAÇÃO COM SUPERSAMPLING 4x E PICKING O(1) POR PIXEL
+# RENDERIZADOR PRINCIPAL — BLOCO 734 (CT/UFC)
 # ==============================================================================
 class RenderizadorCT:
 
   def __init__(self, largura=500, altura=500):
-    self.W = largura
-    self.H = altura
-    self.cena, self.materiais_bloco, self.dados_escultura, self.extras_3d = (
-        montar_cenario()
-    )
-    self.ultimo_pick_data = None
+    self.W = int(largura)
+    self.H = int(altura)
+    self.placa_tex = criar_textura_placa_734()
+    self.materiais = self._criar_materiais()
+    self.primitivas = self._construir_cena_bloco734()
+    self.presets = self._definir_presets()
+    self.pick_buffer = None
 
-    self.presets = {
-        '2_pontos_fuga': {
-            'titulo': (
-                'Perspectiva - 2 Pontos de Fuga (Bloco 734 + Escultura + Fonte)'
-            ),
-            'eye': [6.5, 3.4, 5.5],
-            'at': [28.0, 2.8, 28.0],
-            'up': [0.0, 1.0, 0.0],
-            'd': 1.5,
-            'win': (-1.02, 1.02, -1.02, 1.02),
-            'proj': 'perspectiva',
-        },
-        '1_ponto_fuga': {
-            'titulo': 'Perspectiva - 1 Ponto de Fuga (Frontal Fonte e Fachada)',
-            'eye': [27.0, 3.1, 4.5],
-            'at': [27.0, 2.8, 26.0],
-            'up': [0.0, 1.0, 0.0],
-            'd': 1.5,
-            'win': (-1.05, 1.05, -1.05, 1.05),
-            'proj': 'perspectiva',
-        },
-        '3_pontos_fuga': {
-            'titulo': 'Perspectiva - 3 Pontos de Fuga (Vista Aérea Inclinada)',
-            'eye': [7.5, 18.0, 6.0],
-            'at': [30.0, 2.5, 30.0],
-            'up': [0.0, 1.0, 0.0],
-            'd': 1.5,
-            'win': (-0.98, 0.98, -0.98, 0.98),
-            'proj': 'perspectiva',
-        },
-        'zoom_in': {
-            'titulo': "Zoom In (Escultura 5 Losangos + Espelho d'Água)",
-            'eye': [10.5, 2.5, 13.0],
-            'at': [18.5, 2.2, 22.0],
-            'up': [0.0, 1.0, 0.0],
-            'd': 1.85,
-            'win': (-0.88, 0.88, -0.88, 0.88),
-            'proj': 'perspectiva',
-        },
-        'zoom_out': {
-            'titulo': 'Zoom Out (Campo de Visão Ampliado)',
-            'eye': [6.5, 3.4, 5.5],
-            'at': [28.0, 2.8, 28.0],
-            'up': [0.0, 1.0, 0.0],
-            'd': 1.1,
-            'win': (-1.28, 1.28, -1.28, 1.28),
-            'proj': 'perspectiva',
-        },
-        'ortografica': {
-            'titulo': 'Projeção Ortográfica (Raios Paralelos)',
-            'eye': [10.0, 8.0, 6.0],
-            'at': [29.0, 3.0, 30.0],
-            'up': [0.0, 1.0, 0.0],
-            'd': 1.5,
-            'win': (-23.0, 23.0, -23.0, 23.0),
-            'proj': 'ortografica',
-        },
-        'obliqua': {
-            'titulo': 'Projeção Oblíqua (Cavaleira / Gabinete)',
-            'eye': [25.0, 6.5, 4.0],
-            'at': [25.0, 6.5, 30.0],
-            'up': [0.0, 1.0, 0.0],
-            'd': 1.5,
-            'win': (-23.0, 23.0, -23.0, 23.0),
-            'proj': 'obliqua',
-        },
+  def _criar_materiais(self):
+    return {
+        "asfalto": Material(
+            "Asfalto CBUQ (Textura Procedural)",
+            kd=(0.16, 0.17, 0.20),
+            ke=(0.12, 0.12, 0.14),
+            shininess=12.0,
+            textura="asfalto",
+        ),
+        "calcada": Material(
+            "Calçada Intertravada (Textura Procedural)",
+            kd=(0.68, 0.67, 0.64),
+            ke=(0.15, 0.15, 0.15),
+            shininess=10.0,
+            textura="calcada",
+        ),
+        "alvenaria": Material(
+            "Alvenaria Branca Bloco 734",
+            kd=(0.93, 0.94, 0.96),
+            ke=(0.25, 0.25, 0.28),
+            shininess=22.0,
+        ),
+        "vidro": Material(
+            "Vidro Fumê Arquitetônico",
+            kd=(0.07, 0.12, 0.19),
+            ke=(0.85, 0.92, 1.0),
+            shininess=96.0,
+            refletividade=0.48,
+        ),
+        "esquadria": Material(
+            "Alumínio Anodizado Escuro",
+            kd=(0.14, 0.16, 0.20),
+            ke=(0.45, 0.48, 0.52),
+            shininess=45.0,
+        ),
+        "aco_escultura": Material(
+            "Aço Inox Polido (Escultura Cinética)",
+            kd=(0.90, 0.92, 0.95),
+            ke=(0.95, 0.95, 1.0),
+            shininess=88.0,
+            refletividade=0.35,
+        ),
+        "concreto": Material(
+            "Concreto Estrutural",
+            kd=(0.42, 0.45, 0.50),
+            ke=(0.15, 0.15, 0.15),
+            shininess=14.0,
+        ),
+        "granito": Material(
+            "Granito Escuro da Fonte",
+            kd=(0.20, 0.23, 0.28),
+            ke=(0.35, 0.38, 0.42),
+            shininess=36.0,
+        ),
+        "agua": Material(
+            "Água Refrativa n=1.333 (Textura Ondulatória)",
+            kd=(0.06, 0.45, 0.68),
+            ke=(0.90, 0.96, 1.0),
+            shininess=110.0,
+            refletividade=0.52,
+            textura="agua",
+        ),
+        "tronco": Material(
+            "Madeira / Tronco Natural",
+            kd=(0.36, 0.23, 0.13),
+            ke=(0.08, 0.06, 0.04),
+            shininess=8.0,
+        ),
+        "folha_escura": Material(
+            "Folhagem Verde Floresta",
+            kd=(0.10, 0.46, 0.18),
+            ke=(0.12, 0.18, 0.12),
+            shininess=14.0,
+        ),
+        "folha_clara": Material(
+            "Folhagem Verde Tropical",
+            kd=(0.16, 0.62, 0.24),
+            ke=(0.14, 0.22, 0.14),
+            shininess=16.0,
+        ),
+        "cone_laranja": Material(
+            "PVC Laranja Sinalização",
+            kd=(0.95, 0.36, 0.06),
+            ke=(0.45, 0.35, 0.30),
+            shininess=28.0,
+        ),
+        "cone_espelhado": Material(
+            "PVC Ciano Espelhado (Plano Arbitrário)",
+            kd=(0.08, 0.72, 0.85),
+            ke=(0.55, 0.75, 0.85),
+            shininess=42.0,
+            refletividade=0.22,
+        ),
+        "metal_galv": Material(
+            "Aço Galvanizado Cisalhado",
+            kd=(0.62, 0.66, 0.72),
+            ke=(0.75, 0.78, 0.82),
+            shininess=60.0,
+            refletividade=0.25,
+        ),
+        "placa_734": Material(
+            "Placa Identificadora 734 (Bitmap Procedural)",
+            kd=(0.95, 0.95, 0.95),
+            ke=(0.25, 0.25, 0.25),
+            shininess=20.0,
+            textura="placa734",
+        ),
+        "spot_luz": Material(
+            "Emissor Luminoso Spot / Poste",
+            kd=(0.95, 0.92, 0.75),
+            ke=(1.0, 1.0, 1.0),
+            shininess=80.0,
+            emissivo=(0.85, 0.82, 0.55),
+        ),
+        "carro_prata": Material(
+            "Pintura Automotiva Prata Metálico",
+            kd=(0.74, 0.78, 0.83),
+            ke=(0.85, 0.88, 0.92),
+            shininess=75.0,
+            refletividade=0.30,
+        ),
+        "carro_vermelho": Material(
+            "Pintura Automotiva Vermelho Esportivo",
+            kd=(0.82, 0.11, 0.14),
+            ke=(0.88, 0.55, 0.55),
+            shininess=78.0,
+            refletividade=0.28,
+        ),
+        "cafeteira": Material(
+            "Aço Escovado Cafeteira Expresso CT",
+            kd=(0.24, 0.27, 0.33),
+            ke=(0.75, 0.80, 0.88),
+            shininess=68.0,
+            refletividade=0.25,
+        ),
+        "ave": Material(
+            "Plumagem Azul-Índigo (Ave Territorial)",
+            kd=(0.18, 0.16, 0.48),
+            ke=(0.25, 0.25, 0.45),
+            shininess=24.0,
+        ),
     }
 
-  def _aabb_global_cena(self):
-    valid_aabbs = [p.aabb_cam for p in self.cena if p.aabb_cam is not None]
-    mins = np.min([a[0] for a in valid_aabbs], axis=0)
-    maxs = np.max([a[1] for a in valid_aabbs], axis=0)
-    return mins, maxs
+  def _construir_cena_bloco734(self):
+    """Constrói todo o cenário no Primeiro Octante (X, Y, Z >= 0)."""
+    prims = []
+    pid = 1
 
-  def tracar_raios(self, O_cam, D_cam):
-    shape = D_cam.shape[:-1]
-    t_min = np.full(shape, np.inf)
-    N_min = np.zeros_like(D_cam)
-    N_w_min = np.zeros_like(D_cam)
-    P_w_min = np.zeros_like(D_cam)
-    obj_idx = np.full(shape, -1, dtype=int)
-    sub_mat_min = np.zeros(shape, dtype=int)
+    def add(p):
+      nonlocal pid
+      prims.append(p)
+      pid += 1
 
-    g_min, g_max = self._aabb_global_cena()
-    if not np.any(testar_aabb(O_cam, D_cam, g_min, g_max)):
-      return t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min
+    # 1. Piso Urbano (Via Asfáltica + Calçada)
+    add(
+        CaixaAABB(
+            pid,
+            "Via Asfáltica CT (CBUQ)",
+            "Pavimentação & Urbanismo",
+            [2.0, 0.0, 2.0],
+            [68.0, 0.10, 16.0],
+            self.materiais["asfalto"],
+            "T(35, 0.05, 9) · S(66, 0.1, 14)",
+            "Pista frontal do Centro de Tecnologia com granulometria procedural e faixas duplas amarelas.",
+        )
+    )
+    add(
+        CaixaAABB(
+            pid,
+            "Calçada da Praça Bloco 734",
+            "Pavimentação & Urbanismo",
+            [2.0, 0.0, 16.0],
+            [68.0, 0.20, 60.0],
+            self.materiais["calcada"],
+            "T(35, 0.10, 38) · S(66, 0.2, 44)",
+            "Passeio em blocos intertravados com rejunte procedural no Primeiro Octante.",
+            recebe_caustica=True,
+        )
+    )
 
-    for idx, prim in enumerate(self.cena):
-      t_o, N_o, P_w, sub_m, N_w = intersect_primitiva(
-          O_cam, D_cam, prim, t_min
+    # 2. Bloco 734 (Alas Retangulares + Fachada Arqueada R=22m + Placa 734)
+    add(
+        CaixaAABB(
+            pid,
+            "Bloco 734 — Ala Leste",
+            "Edificação Principal",
+            [37.0, 0.20, 20.0],
+            [59.0, 6.60, 53.0],
+            self.materiais["alvenaria"],
+            "T(48, 3.4, 36.5) · S(22, 6.4, 33)",
+            "Volume principal retangular do Bloco 734 com cobertura acessível por escada lateral.",
+            recebe_caustica=True,
+        )
+    )
+    add(
+        CaixaAABB(
+            pid,
+            "Bloco 734 — Ala Sul",
+            "Edificação Principal",
+            [15.0, 0.20, 42.0],
+            [37.0, 6.60, 53.0],
+            self.materiais["alvenaria"],
+            "T(26, 3.4, 47.5) · S(22, 6.4, 11)",
+            "Volume posterior do Bloco 734 concordando tangencialmente com o arco frontal.",
+        )
+    )
+    add(
+        ArcoBloco734(
+            pid,
+            "Bloco 734 — Fachada Arqueada (R=22m)",
+            "Edificação Principal",
+            37.0,
+            42.0,
+            0.20,
+            6.60,
+            22.0,
+            self.materiais["alvenaria"],
+            "T(37, 0.2, 42) · Cilindro Parcial R=22m",
+            "Fachada curva característica do Bloco 734 que recebe reflexos e cáusticas da fonte.",
+        )
+    )
+
+    # Placa 734 na platibanda
+    ang_p = 0.14 * (math.pi / 2.0)
+    px_p = 37.0 - 22.08 * math.cos(ang_p)
+    pz_p = 42.0 - 22.08 * math.sin(ang_p)
+    add(
+        CaixaAABB(
+            pid,
+            "Placa Identificadora '734'",
+            "Edificação Principal",
+            [px_p - 0.35, 5.20, pz_p - 1.55],
+            [px_p + 0.35, 6.25, pz_p + 1.55],
+            self.materiais["placa_734"],
+            f"T({px_p:.2f}, 5.72, {pz_p:.2f}) · Textura Procedural 734",
+            "Identificação institucional do Bloco 734 gerada por textura procedural.",
+        )
+    )
+
+    # Porta de vidro + 9 Janelas na curva
+    ang_porta = 0.13 * (math.pi / 2.0)
+    add(
+        CaixaAABB(
+            pid,
+            "Porta Principal de Vidro (Bloco 734)",
+            "Esquadrias & Vidros",
+            [
+                37.0 - 22.12 * math.cos(ang_porta) - 0.35,
+                0.22,
+                42.0 - 22.12 * math.sin(ang_porta) - 1.15,
+            ],
+            [
+                37.0 - 22.12 * math.cos(ang_porta) + 0.35,
+                2.75,
+                42.0 - 22.12 * math.sin(ang_porta) + 1.15,
+            ],
+            self.materiais["vidro"],
+            "T(arco s=0.13) · Vidro Refletivo",
+            "Acesso principal em vidro fumê com reflexão especular.",
+        )
+    )
+
+    for i in range(9):
+      s_mid = 0.24 + ((i + 0.5) / 9.0) * 0.72
+      ang_w = s_mid * (math.pi / 2.0)
+      wx = 37.0 - 22.08 * math.cos(ang_w)
+      wz = 42.0 - 22.08 * math.sin(ang_w)
+      add(
+          CaixaAABB(
+              pid,
+              f"Janela Fachada Curva #{i+1}",
+              "Esquadrias & Vidros",
+              [wx - 0.72, 1.38, wz - 0.72],
+              [wx + 0.72, 3.22, wz + 0.72],
+              self.materiais["vidro"],
+              f"T({wx:.1f}, 2.3, {wz:.1f}) · Arco s={s_mid:.2f}",
+              "Janela modulada ao longo do arco R=22m do Bloco 734.",
+          )
       )
-      m = t_o < t_min
-      if np.any(m):
-        t_min = np.where(m, t_o, t_min)
-        N_min = np.where(m[..., None], N_o, N_min)
-        N_w_min = np.where(m[..., None], N_w, N_w_min)
-        P_w_min = np.where(m[..., None], P_w, P_w_min)
-        obj_idx = np.where(m, idx, obj_idx)
-        sub_mat_min = np.where(m, sub_m, sub_mat_min)
 
-    return t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min
+    # 3. Espelho d'Água / Fonte Frontal + 3 Spots Submersos
+    add(
+        CaixaAABB(
+            pid,
+            "Borda Granito — Espelho d'Água",
+            "Fonte & Cáusticas",
+            [19.35, 0.20, 16.65],
+            [34.65, 0.54, 22.95],
+            self.materiais["granito"],
+            "T(27.0, 0.37, 19.8) · S(15.3, 0.34, 6.3)",
+            "Tanque em granito escuro que delimita a lâmina d'água frontal.",
+        )
+    )
+    add(
+        CaixaAABB(
+            pid,
+            "Lâmina d'Água (Fonte Cáustica n=1.333)",
+            "Fonte & Cáusticas",
+            [19.65, 0.22, 16.95],
+            [34.35, 0.56, 22.65],
+            self.materiais["agua"],
+            "T(27.0, 0.39, 19.8) · Refração n=1.333",
+            "Superfície líquida ondulatória que reflete o céu/edifício e projeta cáusticas.",
+        )
+    )
+    for idx_sp, sx in enumerate([22.0, 27.0, 32.0], start=1):
+      add(
+          Esfera(
+              pid,
+              f"Spot Submerso #{idx_sp} (Fonte)",
+              "Iluminação & Spots",
+              [sx, 0.36, 17.20],
+              0.18,
+              self.materiais["spot_luz"],
+              f"T({sx}, 0.36, 17.20) · Spot Submerso",
+              "Projetor subaquático responsável pelos filamentos de cáustica na fachada.",
+          )
+      )
 
-  def _formatar_resultado_pick(self, idx_hit, sub_m, t_val, p_w, n_w):
-    if idx_hit < 0 or not np.isfinite(t_val):
-      return {
-          'hit': False,
-          'nome': 'Céu / Horizonte (Sem interseção)',
-          'grupo': 'Céu Procedural',
-          'descricao': 'Raio não interceptou nenhuma primitiva da cena.',
-          'distancia': None,
-      }
+    # 4. Escultura Cinética em Aço (5 Losangos rotacionados a 45° e -24° em Y)
+    add(
+        CaixaAABB(
+            pid,
+            "Base da Escultura Cinética",
+            "Escultura Cinética",
+            [13.3, 0.20, 20.2],
+            [16.7, 0.48, 23.8],
+            self.materiais["concreto"],
+            "T(15.0, 0.34, 22.0) · S(3.4, 0.28, 3.6)",
+            "Pedestal em concreto armado da escultura geométrica do CT.",
+        )
+    )
+    tris_esc = []
+    M_base_esc = mat_translacao(15.0, 0.48, 22.0) @ mat_rotacao_y(
+        math.radians(-24.0)
+    )
+    for k in range(5):
+      fc = k - 2
+      Lk = 2.35 * (1.0 - 0.055 * fc)
+      rk = Lk / math.sqrt(2.0)
+      M_quad = (
+          M_base_esc
+          @ mat_translacao(fc * 0.22, rk + 0.05, -1.16 + k * 0.58)
+          @ mat_rotacao_z(math.pi / 4.0)
+      )
+      esp, prof = 0.14, 0.16
+      tris_esc.extend(
+          gerar_caixa_triangulos(
+              Lk + esp, esp, prof, M_quad @ mat_translacao(0, Lk * 0.5, 0)
+          )
+      )
+      tris_esc.extend(
+          gerar_caixa_triangulos(
+              Lk + esp, esp, prof, M_quad @ mat_translacao(0, -Lk * 0.5, 0)
+          )
+      )
+      tris_esc.extend(
+          gerar_caixa_triangulos(
+              esp, Lk + esp, prof, M_quad @ mat_translacao(Lk * 0.5, 0, 0)
+          )
+      )
+      tris_esc.extend(
+          gerar_caixa_triangulos(
+              esp, Lk + esp, prof, M_quad @ mat_translacao(-Lk * 0.5, 0, 0)
+          )
+      )
+    add(
+        MalhaTriangulos(
+            pid,
+            "Escultura Cinética em Aço (5 Losangos)",
+            "Escultura Cinética",
+            tris_esc,
+            self.materiais["aco_escultura"],
+            "T(15,0.48,22) · Ry(-24°) · Rz(45°) · S(Lk)",
+            "Cinco quadros metálicos rotacionados a 45° com progressão de escala.",
+        )
+    )
 
-    prim = self.cena[idx_hit]
-    mat = prim.mat
-    nome_exib = prim.nome
-    if prim.tipo == 'bloco_ct_arqueado':
-      mat = self.materiais_bloco.get(sub_m, prim.mat)
-      nomes_sub = {
-          0: 'Bloco 734 — Alvenaria Branca',
-          1: 'Bloco 734 — Vidro Fumê Refletivo (Janela / Porta)',
-          2: 'Bloco 734 — Platibanda Nº 734',
-          3: 'Bloco 734 — Esquadria Alumínio Escuro',
-      }
-      nome_exib = nomes_sub.get(sub_m, prim.nome)
+    # 5. Escada Lateral de Acesso ao Telhado
+    add(
+        CaixaAABB(
+            pid,
+            "Escada de Acesso ao Telhado",
+            "Edificação Principal",
+            [59.05, 0.20, 23.45],
+            [59.65, 6.75, 24.55],
+            self.materiais["esquadria"],
+            "T(59.35, 3.47, 24.0) · S(0.6, 6.55, 1.1)",
+            "Escada marinheiro lateral para acesso à cobertura do Bloco 734.",
+        )
+    )
 
+    # 6. Árvores (Cilindros + Esferas rotacionadas via Quatérnios) + Ave Predadora
+    arvores = [
+        ("Árvore Bosque Esquerdo", 10.5, 28.5, 1.15),
+        ("Árvore Fundo Esquerdo", 11.5, 38.0, 1.25),
+        ("Árvore Praça Direita", 37.5, 17.5, 0.90),
+    ]
+    for nome_a, ax, az, esc in arvores:
+      add(
+          CilindroY(
+              pid,
+              f"Tronco — {nome_a}",
+              "Vegetação & Fauna",
+              ax,
+              az,
+              0.20,
+              0.20 + 3.2 * esc,
+              0.34 * esc,
+              self.materiais["tronco"],
+              f"T({ax}, 0.2, {az}) · S({esc})",
+              "Tronco cilíndrico no Primeiro Octante.",
+          )
+      )
+      q_rot = quat_para_matriz([0.3, 1.0, 0.2], 0.65 * esc)
+      offsets = [
+          (0.0, 3.6, 0.0, 1.65, "folha_escura"),
+          (-1.05, 3.2, 0.55, 1.25, "folha_clara"),
+          (1.05, 3.3, -0.50, 1.30, "folha_clara"),
+          (0.25, 4.45, 0.35, 1.20, "folha_escura"),
+      ]
+      for idx_c, (ox, oy, oz, r_c, m_key) in enumerate(offsets, start=1):
+        off_rot = (q_rot @ np.array([ox, 0.0, oz, 1.0]))[:3]
+        add(
+            Esfera(
+                pid,
+                f"Copa #{idx_c} — {nome_a}",
+                "Vegetação & Fauna",
+                [ax + off_rot[0] * esc, oy * esc, az + off_rot[2] * esc],
+                r_c * esc,
+                self.materiais[m_key],
+                "T · Quatérnio([0.3,1,0.2]) · S(r)",
+                "Volume esférico da copa posicionado via matriz de quatérnio.",
+            )
+        )
+
+    # Ave Predadora empoleirada na árvore do fundo (X=11.5, Z=38.0)
+    add(
+        ConeY(
+            pid,
+            "Ave Predadora Territorial",
+            "Vegetação & Fauna",
+            11.5,
+            38.0,
+            5.10,
+            1.05,
+            0.34,
+            self.materiais["ave"],
+            "T(11.5, 5.1, 38.0) · Cone",
+            "Ave empoleirada na copa da Árvore do Fundo.",
+        )
+    )
+
+    # Palmeira Tropical Estilizada (X=42.5, Z=17.5)
+    add(
+        CilindroY(
+            pid,
+            "Tronco — Palmeira Tropical CT",
+            "Vegetação & Fauna",
+            42.5,
+            17.5,
+            0.20,
+            4.65,
+            0.22,
+            self.materiais["tronco"],
+            "T(42.5, 0.2, 17.5) · Cilindro h=4.45m",
+            "Estipe cilíndrico da palmeira ornamental da praça.",
+        )
+    )
+    add(
+        Esfera(
+            pid,
+            "Copa — Palmeira Tropical CT",
+            "Vegetação & Fauna",
+            [42.5, 4.85, 17.5],
+            1.15,
+            self.materiais["folha_clara"],
+            "T(42.5, 4.85, 17.5) · Quatérnio",
+            "Coroa foliar da palmeira tropical.",
+        )
+    )
+
+    # 7. Cones de Sinalização + Reflexo em Plano Arbitrário (Quest Bônus 6.2)
+    cones_orig = [(35.3, 16.2), (35.9, 15.6), (36.5, 16.9), (37.1, 16.3)]
+    M_esp = mat_espelho_plano([38.2, 0.2, 15.2], [1.0, 0.0, -1.0])
+    for idx_cn, (cx, cz) in enumerate(cones_orig, start=1):
+      add(
+          ConeY(
+              pid,
+              f"Cone Sinalização #{idx_cn}",
+              "Sinalização & Espelho",
+              cx,
+              cz,
+              0.20,
+              0.95,
+              0.32,
+              self.materiais["cone_laranja"],
+              f"T({cx}, 0.2, {cz}) · Cone",
+              "Cone viário original no Primeiro Octante.",
+          )
+      )
+      p_esp = aplicar_matriz_pontos(M_esp, np.array([[cx, 0.20, cz]]))[0]
+      add(
+          ConeY(
+              pid,
+              f"Cone Espelhado #{idx_cn} (Plano Oblíquo)",
+              "Sinalização & Espelho",
+              float(p_esp[0]),
+              float(p_esp[2]),
+              0.20,
+              0.95,
+              0.32,
+              self.materiais["cone_espelhado"],
+              "H = I - 2nnᵀ · Espelho em Plano Arbitrário",
+              "Cone duplicado via matriz de reflexão especular em plano oblíquo.",
+          )
+      )
+
+    # 8. Abrigo Metálico Cisalhado (Quest Bônus 6.1) + 4 Pilares
+    M_abrigo = (
+        mat_translacao(46.8, 2.65, 18.8)
+        @ mat_cisalhamento_xy(sh_xy=-0.12, sh_zy=0.04)
+    )
+    tris_abrigo = gerar_caixa_triangulos(4.5, 0.16, 3.2, M_abrigo)
+    add(
+        MalhaTriangulos(
+            pid,
+            "Abrigo Metálico (Malha Cisalhada XY)",
+            "Mobiliário & Abrigo",
+            tris_abrigo,
+            self.materiais["metal_galv"],
+            "T(46.8,2.65,18.8) · ShearXY(-0.12)",
+            "Cobertura em malha triangular deformada por cisalhamento XY.",
+        )
+    )
+    for idx_p, (px, pz) in enumerate(
+        [(44.7, 17.4), (48.8, 17.4), (44.7, 20.2), (48.8, 20.2)], start=1
+    ):
+      add(
+          CilindroY(
+              pid,
+              f"Pilar Abrigo #{idx_p}",
+              "Mobiliário & Abrigo",
+              px,
+              pz,
+              0.20,
+              2.60,
+              0.08,
+              self.materiais["esquadria"],
+              f"T({px}, 0.2, {pz}) · Cilindro",
+              "Pilar tubular de sustentação do abrigo.",
+          )
+      )
+
+    # 9. Máquina de Café Expresso CT (Reposicionada em ilha aberta na praça: X=35.8, Z=18.8)
+    add(
+        CaixaAABB(
+            pid,
+            "Balcão — Máquina de Café Expresso CT",
+            "Cafeteria & Interação",
+            [35.35, 0.20, 18.40],
+            [36.25, 1.10, 19.20],
+            self.materiais["tronco"],
+            "T(35.8, 0.65, 18.8) · Ilha Aberta",
+            "Balcão da cafeteira reposicionado em área aberta para câmera livre 360°.",
+        )
+    )
+    add(
+        CaixaAABB(
+            pid,
+            "Máquina de Café Expresso CT",
+            "Cafeteria & Interação",
+            [35.55, 1.10, 18.58],
+            [36.05, 1.68, 19.02],
+            self.materiais["cafeteira"],
+            "T(35.8, 1.39, 18.8) · S(0.5, 0.58, 0.44)",
+            "Cafeteira automática do CT que restaura energia e ativa cutscene.",
+        )
+    )
+
+    # 10. 4 Postes de Iluminação Pública (Quest 7.1)
+    postes = [
+        (9.5, 21.0, 0.6),
+        (18.5, 16.2, 0.4),
+        (41.0, 16.5, 0.0),
+        (54.5, 17.5, -0.5),
+    ]
+    for idx_pt, (px, pz, ox) in enumerate(postes, start=1):
+      add(
+          CilindroY(
+              pid,
+              f"Poste Iluminação #{idx_pt}",
+              "Iluminação & Spots",
+              px,
+              pz,
+              0.20,
+              6.20,
+              0.11,
+              self.materiais["esquadria"],
+              f"T({px}, 0.2, {pz}) · h=6.0m",
+              "Poste metálico de iluminação viária/praça.",
+          )
+      )
+      add(
+          Esfera(
+              pid,
+              f"Luminária Pontual #{idx_pt}",
+              "Iluminação & Spots",
+              [px + ox, 6.32, pz + 0.35],
+              0.28,
+              self.materiais["spot_luz"],
+              f"Luz Pontual #{idx_pt} (Atenuação Quadrática)",
+              "Fonte luminosa pontual com atenuação física 1/(c0 + c1·d + c2·d²).",
+          )
+      )
+
+    # 11. Veículos na Via CT (SUV Prata e Esportivo Vermelho)
+    add(
+        CaixaAABB(
+            pid,
+            "SUV Prata na Via CT",
+            "Veículos & Tráfego",
+            [20.8, 0.25, 6.2],
+            [25.2, 1.55, 8.2],
+            self.materiais["carro_prata"],
+            "T(23.0, 0.9, 7.2) · S(4.4, 1.3, 2.0)",
+            "Veículo utilitário transitando na via frontal do CT.",
+        )
+    )
+    add(
+        CaixaAABB(
+            pid,
+            "Carro Esportivo Vermelho",
+            "Veículos & Tráfego",
+            [36.8, 0.25, 9.6],
+            [41.2, 1.42, 11.6],
+            self.materiais["carro_vermelho"],
+            "T(39.0, 0.84, 10.6) · S(4.4, 1.17, 2.0)",
+            "Carro esportivo vermelho na pista do Centro de Tecnologia.",
+        )
+    )
+
+    return prims
+
+  def _definir_presets(self):
+    """Define todos os presets de câmera, pontos de fuga e projeções (Atos IV e V)."""
     return {
-        'hit': True,
-        'nome': nome_exib,
-        'grupo': prim.grupo_ar,
-        'tipo_primitiva': prim.tipo.upper(),
-        'material': mat.nome,
-        'kd': tuple(np.round(mat.kd, 3)),
-        'ke': tuple(np.round(mat.ke, 3)),
-        'refletividade': float(mat.refletividade),
-        'distancia': float(t_val),
-        'ponto_world': tuple(np.round(p_w, 3)),
-        'normal_world': tuple(np.round(n_w, 3)),
-        'transformacao': prim.transformacao_desc,
-        'descricao': prim.descricao_ar,
-    }
-
-  def consultar_pick_buffer(self, px, py):
-    """Consulta O(1) instantânea no buffer do último render (sem relançar raios)."""
-    if self.ultimo_pick_data is None:
-      return {'hit': False, 'nome': 'Renderize a cena primeiro.'}
-
-    buf = self.ultimo_pick_data
-    h, w = buf['obj_idx'].shape
-    ix = int(np.clip(px, 0, w - 1))
-    iy = int(np.clip(py, 0, h - 1))
-
-    return self._formatar_resultado_pick(
-        int(buf['obj_idx'][iy, ix]),
-        int(buf['sub_mat'][iy, ix]),
-        float(buf['t_min'][iy, ix]),
-        buf['P_world'][iy, ix],
-        buf['N_world'][iy, ix],
-    )
-
-  def inspecionar_pixel_renderizado(self, cfg, px, py, incluir_objs=True):
-    """Fallback seguro para picking por pixel (usa buffer O(1) se compatível ou traça 1 raio)."""
-    if self.ultimo_pick_data is not None:
-      return self.consultar_pick_buffer(px, py)
-
-    M_wc = construir_Mwc(cfg['eye'], cfg['at'], cfg['up'])
-    for prim in self.cena:
-      prim.preparar_camera(M_wc)
-
-    xmin, xmax, ymin, ymax = cfg['win']
-    d = cfg['d']
-    u_val = xmin + ((px + 0.5) / self.W) * (xmax - xmin)
-    v_val = ymax + ((py + 0.5) / self.H) * (ymin - ymax)
-    U = np.array([[u_val]], dtype=np.float64)
-    V = np.array([[v_val]], dtype=np.float64)
-
-    if cfg['proj'] == 'perspectiva':
-      O_cam = np.zeros((1, 1, 3), dtype=np.float64)
-      D_cam = np.stack([U, V, np.full_like(U, -d)], axis=-1)
-      D_cam /= np.linalg.norm(D_cam, axis=-1, keepdims=True)
-    elif cfg['proj'] == 'ortografica':
-      O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
-      D_cam = np.array([[[0.0, 0.0, -1.0]]], dtype=np.float64)
-    else:
-      O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
-      l_ob, ang_ob = 0.5, np.deg2rad(45.0)
-      d_vec = np.array([-l_ob * np.cos(ang_ob), -l_ob * np.sin(ang_ob), -1.0])
-      d_vec /= np.linalg.norm(d_vec)
-      D_cam = d_vec.reshape(1, 1, 3)
-
-    t_min, _, P_w_min, obj_idx, sub_mat_min, N_w_min = self.tracar_raios(
-        O_cam, D_cam
-    )
-    return self._formatar_resultado_pick(
-        int(obj_idx[0, 0]),
-        int(sub_mat_min[0, 0]),
-        float(t_min[0, 0]),
-        P_w_min[0, 0],
-        N_w_min[0, 0],
-    )
-
-  def obter_status_quests(
-      self, cfg_atual=None, resolucao=None, ativar_sombras=True
-  ):
-    """Avalia automaticamente o cumprimento dos 8 Atos e Quests Bônus de CG I."""
-    res_atual = resolucao or self.W
-    tipos_presentes = {p.tipo for p in self.cena}
-    materiais_unicos = {p.mat.nome for p in self.cena}
-    texturas_unicas = {
-        p.mat.textura for p in self.cena if p.mat.textura is not None
-    }
-    primeiro_octante_ok = all(
-        (p.aabb_world is None or np.all(p.aabb_world[0] >= -1e-4))
-        for p in self.cena
-    )
-    proj_atual = cfg_atual.get('proj', 'perspectiva') if cfg_atual else 'perspectiva'
-
-    return {
-        'ato_1': {
-            'titulo': 'ATO I — A Construção do Mundo',
-            'items': [
-                ('Sub-quest 1.1 — Tudo Tem Um Propósito (Cenário Bloco 734 CT)', True, 'Obrigatória'),
-                (f'Sub-quest 1.2 — O Primeiro Octante (X,Y,Z >= 0)', primeiro_octante_ok, 'Obrigatória'),
-                (
-                    f'Quest 2 — Zoo dos Objetos ({len(tipos_presentes)} tipos: Esfera, Cilindro, Cone, Malha)',
-                    {'esfera', 'cilindro', 'cone', 'malha'}.issubset(tipos_presentes),
-                    'Obrigatória',
-                ),
-                (
-                    f'Sub-quest 3.1 — Diversidade ({len(materiais_unicos)} materiais >= 4)',
-                    len(materiais_unicos) >= 4,
-                    'Obrigatória',
-                ),
-                (
-                    f'Sub-quest 3.2 — A Pele Pintada ({len(texturas_unicas)} texturas procedurais)',
-                    len(texturas_unicas) >= 1,
-                    'Obrigatória',
-                ),
-            ],
+        "principal": {
+            "titulo": "Perspectiva Principal — Fachada Bloco 734 & Fonte",
+            "eye": [14.5, 4.4, 6.5],
+            "at": [33.5, 2.8, 28.0],
+            "up": [0.0, 1.0, 0.0],
+            "d": 1.35,
+            "win": (-1.05, 1.05, -1.05, 1.05),
+            "proj": "perspectiva",
         },
-        'ato_2': {
-            'titulo': 'ATO II — As Transformações Mágicas',
-            'items': [
-                ('Quest 4 — O Ritual da Translação (4x4)', True, 'Obrigatória'),
-                ('Sub-quest 5.1 — O Eixo Sagrado (Rotação X, Y, Z)', True, 'Obrigatória'),
-                ('Sub-quest 5.2 — O Eixo Livre (Quatérnios)', True, 'Obrigatória'),
-                ('Quest 6 — O Encantamento da Escala', True, 'Obrigatória'),
-                ('Quest Bônus 6.1 — A Distorção (Cisalhamento Abrigo)', True, '+0.5 pts'),
-                ('Quest Bônus 6.2 — O Reflexo Perfeito (Espelho Cones)', True, '+0.5 pts'),
-            ],
+        "zoom_out": {
+            "titulo": "Quest 10 — Perspectiva Zoom Out (Vista Geral CT)",
+            "eye": [6.5, 11.5, 2.5],
+            "at": [34.0, 2.5, 29.0],
+            "up": [0.0, 1.0, 0.0],
+            "d": 1.05,
+            "win": (-1.20, 1.20, -1.20, 1.20),
+            "proj": "perspectiva",
         },
-        'ato_3': {
-            'titulo': 'ATO III — A Luz e a Escuridão',
-            'items': [
-                ('Sub-quest 7.1 — A Chama Pontual (4 Postes)', True, 'Obrigatória'),
-                ('Sub-quest 7.2 — O Brilho Ambiente (Ia)', True, 'Obrigatória'),
-                ('Sub-quest Bônus 7.3 — O Holofote (Spot Escultura)', True, '+1.0 pts'),
-                ('Sub-quest Bônus 7.4 — O Sol Direcional', True, '+0.5 pts'),
-            ],
+        "zoom_in": {
+            "titulo": "Quest 10 — Perspectiva Zoom In (Escultura & Cáusticas)",
+            "eye": [11.2, 2.6, 15.5],
+            "at": [18.5, 2.1, 22.8],
+            "up": [0.0, 1.0, 0.0],
+            "d": 1.85,
+            "win": (-0.85, 0.85, -0.85, 0.85),
+            "proj": "perspectiva",
         },
-        'ato_4_5': {
-            'titulo': 'ATOS IV & V — Câmera e Projeções',
-            'items': [
-                ('Quests 8 e 9 — Eye, At, Up, Distância Focal (d) e Janela', True, 'Obrigatória'),
-                ('Quest 10 — Perspectiva (Presets Zoom In / Zoom Out)', True, 'Obrigatória'),
-                ('Bônus Pontos de Fuga — 1, 2 e 3 Pontos de Fuga', True, '+1.5 pts'),
-                (
-                    f'Bônus Projeções Alternativas — Ortográfica / Oblíqua (Atual: {proj_atual})',
-                    True,
-                    '+1.0 pts',
-                ),
-            ],
+        "1_ponto_fuga": {
+            "titulo": "Bônus — 1 Ponto de Fuga (Eixo Frontal Z)",
+            "eye": [27.0, 2.4, 4.0],
+            "at": [27.0, 2.4, 35.0],
+            "up": [0.0, 1.0, 0.0],
+            "d": 1.30,
+            "win": (-1.10, 1.10, -1.10, 1.10),
+            "proj": "perspectiva",
         },
-        'ato_6_7_8': {
-            'titulo': 'ATOS VI, VII & VIII — Sombras, Picking e Mosaico 500x500',
-            'items': [
-                ('Quest 11 — A Sombra (Sombras Projetadas)', ativar_sombras, 'Obrigatória'),
-                ('Quest 12 — O Toque (Picking Interativo 3D & Render)', True, 'Obrigatória'),
-                ('Bônus — Interface Gráfica Interativa (Streamlit + WebGL)', True, '+1.0 pts'),
-                (
-                    f'Quest 13 — O Mosaico de 500x500 (Atual: {res_atual}x{res_atual})',
-                    res_atual >= 500,
-                    'Obrigatória',
-                ),
-                ('Quest Lendária — Criatividade e Beleza (Cáusticas + Game)', True, '+1.0 pts'),
-            ],
+        "2_pontos_fuga": {
+            "titulo": "Bônus — 2 Pontos de Fuga (Horizontal Nivelado)",
+            "eye": [12.0, 3.2, 8.0],
+            "at": [35.0, 3.2, 28.0],
+            "up": [0.0, 1.0, 0.0],
+            "d": 1.35,
+            "win": (-1.05, 1.05, -1.05, 1.05),
+            "proj": "perspectiva",
+        },
+        "3_pontos_fuga": {
+            "titulo": "Bônus — 3 Pontos de Fuga (Plongée Aéreo)",
+            "eye": [10.0, 16.5, 5.0],
+            "at": [34.0, 1.8, 28.0],
+            "up": [0.0, 1.0, 0.0],
+            "d": 1.30,
+            "win": (-1.10, 1.10, -1.10, 1.10),
+            "proj": "perspectiva",
+        },
+        "isometrica": {
+            "titulo": "Bônus — Projeção Ortográfica / Isométrica",
+            "eye": [8.0, 22.0, 4.0],
+            "at": [34.0, 2.5, 28.0],
+            "up": [0.0, 1.0, 0.0],
+            "d": 1.0,
+            "win": (-24.0, 24.0, -24.0, 24.0),
+            "proj": "ortografica",
+        },
+        "obliqua": {
+            "titulo": "Bônus — Projeção Oblíqua (Gabinete 45°)",
+            "eye": [28.0, 5.5, 4.0],
+            "at": [28.0, 5.5, 30.0],
+            "up": [0.0, 1.0, 0.0],
+            "d": 1.0,
+            "win": (-22.0, 22.0, -18.0, 26.0),
+            "proj": "obliqua",
         },
     }
 
-  def sombrear(
-      self,
-      O_cam,
-      D_cam,
-      t_min,
-      N_min,
-      P_w_min,
-      obj_idx,
-      sub_mat_min,
-      N_w_min,
-      luzes,
-      modo_noite=False,
-      permitir_reflexo=True,
-      ativar_sombras=True,
-      ativar_caustics=True,
-  ):
-    shape = D_cam.shape[:-1]
-    hit = np.isfinite(t_min)
-    P_cam = np.where(hit[..., None], O_cam + t_min[..., None] * D_cam, 0.0)
-    V_cam = -D_cam
+  def _avaliar_textura(self, mat, P):
+    """Calcula Kd procedural no ponto P (N, 3)."""
+    N = P.shape[0]
+    kd = np.broadcast_to(mat.kd, (N, 3)).copy()
+    if mat.textura is None:
+      return kd
 
-    flip = np.einsum('...i,...i->...', N_min, V_cam) < 0
-    N_min = np.where(flip[..., None], -N_min, N_min)
+    x, y, z = P[:, 0], P[:, 1], P[:, 2]
 
-    Kd = np.zeros_like(D_cam)
-    Ke = np.zeros_like(D_cam)
-    Ka = np.zeros_like(D_cam)
-    brilho = np.full(shape, 32.0)
-    refl = np.zeros(shape)
-    emissivo = np.zeros_like(D_cam)
+    if mat.textura == "asfalto":
+      grao = (np.sin(x * 37.0) * np.cos(z * 41.0)) * 0.025
+      kd = np.clip(kd + grao[:, None], 0.05, 0.95)
+      faixa = (np.abs(z - 11.5) < 0.08) | (np.abs(z - 11.9) < 0.08)
+      faixa &= (x >= 4.0) & (x <= 66.0)
+      kd[faixa] = [0.92, 0.72, 0.08]
 
-    for idx, prim in enumerate(self.cena):
-      m = obj_idx == idx
-      if not np.any(m):
+    elif mat.textura == "calcada":
+      rejunte = (np.abs((x * 2.0) % 1.0 - 0.5) > 0.46) | (
+          np.abs((z * 2.0) % 1.0 - 0.5) > 0.46
+      )
+      var_bloco = (
+          np.sin(np.floor(x * 2.0) * 12.7 + np.floor(z * 2.0) * 31.1) * 0.04
+      )
+      kd = np.clip(kd + var_bloco[:, None], 0.1, 0.95)
+      kd[rejunte] *= 0.72
+
+    elif mat.textura == "agua":
+      onda = np.sin(x * 3.8 + z * 2.4) * np.cos(z * 4.5 - x * 1.9)
+      kd[:, 1] = np.clip(kd[:, 1] + onda * 0.08, 0.1, 0.95)
+      kd[:, 2] = np.clip(kd[:, 2] + onda * 0.12, 0.2, 1.0)
+
+    elif mat.textura == "placa734":
+      u = np.clip((z - (42.0 - 22.08 * math.sin(0.14 * math.pi * 0.5) - 1.55)) / 3.10, 0.0, 0.999)
+      v = np.clip(1.0 - (y - 5.20) / 1.05, 0.0, 0.999)
+      iu = (u * self.placa_tex.shape[1]).astype(int)
+      iv = (v * self.placa_tex.shape[0]).astype(int)
+      kd = self.placa_tex[iv, iu]
+
+    return kd
+
+  def _cacar_intersecao(self, O, D):
+    """Encontra a interseção mais próxima para um lote de raios (O, D)."""
+    N = O.shape[0]
+    best_t = np.full(N, np.inf, dtype=np.float64)
+    best_N = np.zeros_like(D)
+    best_pid = np.zeros(N, dtype=np.int32)
+
+    for prim in self.primitivas:
+      t, n = prim.intersectar(O, D)
+      closer = t < best_t
+      if np.any(closer):
+        best_t[closer] = t[closer]
+        best_N[closer] = n[closer]
+        best_pid[closer] = prim.pid
+
+    return best_t, best_N, best_pid
+
+  def _em_sombra(self, P, L_dir, max_dist):
+    """Quest 11: Shadow rays para verificar oclusão entre P e a fonte de luz."""
+    N = P.shape[0]
+    em_sombra = np.zeros(N, dtype=bool)
+    O_s = P + L_dir * 2e-3
+    D_s = np.broadcast_to(L_dir, (N, 3)) if L_dir.ndim == 1 else L_dir
+
+    for prim in self.primitivas:
+      # Ignora objetos luminosos emissores e lâmina d'água transparente
+      if prim.material is self.materiais["spot_luz"] or prim.material is self.materiais["agua"]:
         continue
-      if prim.tipo == 'bloco_ct_arqueado':
-        for sm_id, mat_sm in self.materiais_bloco.items():
-          ms = m & (sub_mat_min == sm_id)
-          if np.any(ms):
-            kd_val = avaliar_textura(mat_sm.textura, P_w_min, mat_sm.kd)
-            Kd = np.where(ms[..., None], kd_val, Kd)
-            Ke = np.where(ms[..., None], mat_sm.ke, Ke)
-            Ka = np.where(ms[..., None], mat_sm.ka, Ka)
-            brilho = np.where(ms, mat_sm.brilho, brilho)
-            refl = np.where(ms, mat_sm.refletividade, refl)
-      else:
-        kd_val = avaliar_textura(prim.mat.textura, P_w_min, prim.mat.kd)
-        Kd = np.where(m[..., None], kd_val, Kd)
-        Ke = np.where(m[..., None], prim.mat.ke, Ke)
-        Ka = np.where(m[..., None], prim.mat.ka, Ka)
-        brilho = np.where(m, prim.mat.brilho, brilho)
-        refl = np.where(m, prim.mat.refletividade, refl)
+      t, _ = prim.intersectar(O_s, D_s)
+      em_sombra |= (t > 1e-4) & (t < max_dist - 1e-2)
+      if np.all(em_sombra):
+        break
+    return em_sombra
 
-        if 'Luminária Poste' in prim.nome:
-          emissivo = np.where(
-              m[..., None],
-              np.array([1.0, 0.90, 0.62]) * (1.25 if modo_noite else 0.15),
-              emissivo,
-          )
-        elif 'Spot Submerso' in prim.nome:
-          emissivo = np.where(
-              m[..., None],
-              np.array([0.65, 0.96, 1.00]) * (1.40 if modo_noite else 0.35),
-              emissivo,
-          )
-        elif 'Farol' in prim.nome:
-          emissivo = np.where(
-              m[..., None],
-              np.array([1.0, 0.96, 0.78]) * (1.15 if modo_noite else 0.25),
-              emissivo,
-          )
-        elif 'Lanterna' in prim.nome:
-          emissivo = np.where(
-              m[..., None],
-              np.array([1.0, 0.15, 0.15]) * (1.10 if modo_noite else 0.25),
-              emissivo,
-          )
-        elif 'Monitor PC' in prim.nome or 'LED Pronta' in prim.nome:
-          emissivo = np.where(
-              m[..., None], prim.mat.kd * (0.95 if modo_noite else 0.35), emissivo
-          )
+  def _sombrear_raios(
+      self,
+      O,
+      D,
+      modo_noite=False,
+      ativar_caustics=True,
+      ativar_reflexos=True,
+      ativar_sombras=True,
+      ativar_sol=True,
+      ativar_spots=True,
+      profundidade=0,
+  ):
+    """Calcula radiância RGB (Phong + Sombras + Spots + Sol + Cáusticas + Reflexão)."""
+    N = O.shape[0]
+    best_t, best_N, best_pid = self._cacar_intersecao(O, D)
 
-    cor = Ka * luzes['I_amb'] + emissivo
-    P_eps = P_cam + N_min * 0.02
-
-    if not modo_noite:
-      L_dir = -luzes['dir_cam']
-      sombra_dir = np.zeros(shape, dtype=bool)
-      if ativar_sombras:
-        D_dir_bcast = np.broadcast_to(L_dir, D_cam.shape)
-        for prim in self.cena[2:]:
-          ts, _, _, _, _ = intersect_primitiva(P_eps, D_dir_bcast, prim)
-          sombra_dir |= hit & np.isfinite(ts)
-      ndl_d = np.maximum(0.0, np.einsum('...i,i->...', N_min, L_dir))
-      R_d = 2.0 * ndl_d[..., None] * N_min - L_dir
-      rdv_d = np.maximum(0.0, np.einsum('...i,...i->...', R_d, V_cam))
-      cor += (~sombra_dir)[..., None] * (
-          Kd * luzes['I_dir'] * ndl_d[..., None]
-          + Ke * luzes['I_dir'] * (rdv_d[..., None] ** brilho[..., None])
-      )
-
-    for p_cam, i_poste in luzes['postes_cam']:
-      L_p_vec = p_cam - P_cam
-      dist_p = np.linalg.norm(L_p_vec, axis=-1)
-      L_p = L_p_vec / np.where(
-          dist_p[..., None] > 1e-8, dist_p[..., None], 1.0
-      )
-      aten_p = 1.0 / (1.0 + 0.008 * (dist_p**2))
-      ndl_p = np.maximum(0.0, np.einsum('...i,...i->...', N_min, L_p))
-      R_p = 2.0 * ndl_p[..., None] * N_min - L_p
-      rdv_p = np.maximum(0.0, np.einsum('...i,...i->...', R_p, V_cam))
-      cor += aten_p[..., None] * (
-          Kd * i_poste * ndl_p[..., None]
-          + Ke * i_poste * (rdv_p[..., None] ** brilho[..., None])
-      )
-
-    L_s_vec = luzes['spot_pos_cam'] - P_cam
-    dist_s = np.linalg.norm(L_s_vec, axis=-1)
-    L_s = L_s_vec / np.where(dist_s[..., None] > 1e-8, dist_s[..., None], 1.0)
-    cos_ang = np.einsum('...i,i->...', -L_s, luzes['spot_dir_cam'])
-    fator_spot = np.where(
-        cos_ang >= luzes['spot_cos_cutoff'],
-        np.maximum(0.0, cos_ang) ** 6.0,
-        0.0,
-    )
-    aten_s = 1.0 / (1.0 + 0.006 * (dist_s**2))
-    ndl_s = np.maximum(0.0, np.einsum('...i,...i->...', N_min, L_s))
-    cor += (fator_spot * aten_s)[..., None] * (
-        Kd * luzes['I_spot'] * ndl_s[..., None]
-    )
-
-    if ativar_caustics:
-      cor_caustica = calcular_caustica_fonte(
-          P_w_min, N_w_min, self.extras_3d['fonte'], modo_noite
-      )
-      cor += cor_caustica
-
-    if permitir_reflexo and np.any(refl > 0.01):
-      D_refl = (
-          D_cam
-          - 2.0 * np.einsum('...i,...i->...', D_cam, N_min)[..., None] * N_min
-      )
-      D_refl /= np.linalg.norm(D_refl, axis=-1, keepdims=True)
-      t_r, N_r, P_wr, idx_r, sub_r, Nw_r = self.tracar_raios(P_eps, D_refl)
-      cor_r = self.sombrear(
-          P_eps,
-          D_refl,
-          t_r,
-          N_r,
-          P_wr,
-          idx_r,
-          sub_r,
-          Nw_r,
-          luzes,
-          modo_noite=modo_noite,
-          permitir_reflexo=False,
-          ativar_sombras=False,
-          ativar_caustics=ativar_caustics,
-      )
-      cor = (1.0 - refl[..., None]) * cor + refl[..., None] * cor_r
-
-    ceu_t = np.clip(0.5 + 0.5 * D_cam[..., 1], 0.0, 1.0)[..., None]
-    if modo_noite:
-      ceu = (1.0 - ceu_t) * np.array([0.04, 0.07, 0.14]) + ceu_t * np.array(
-          [0.01, 0.02, 0.06]
-      )
+    # Gradiente de céu (Dia vs Noite / Sol desligado)
+    t_sky = np.clip(0.5 * (D[:, 1] + 1.0), 0.0, 1.0)[:, None]
+    if modo_noite or not ativar_sol:
+      sky_bot = np.array([[0.04, 0.07, 0.16]])
+      sky_top = np.array([[0.01, 0.02, 0.06]])
     else:
-      ceu = (1.0 - ceu_t) * np.array([0.82, 0.90, 0.98]) + ceu_t * np.array(
-          [0.32, 0.58, 0.88]
-      )
+      sky_bot = np.array([[0.78, 0.89, 0.99]])
+      sky_top = np.array([[0.28, 0.56, 0.92]])
+    cor = sky_bot * (1.0 - t_sky) + sky_top * t_sky
 
-    return np.where(hit[..., None], np.clip(cor, 0.0, 1.0), ceu)
+    hit = best_pid > 0
+    if not np.any(hit):
+      return cor, best_t, best_N, best_pid
+
+    idx_hit = np.where(hit)[0]
+    Ph = O[idx_hit] + best_t[idx_hit, None] * D[idx_hit]
+    Nh = best_N[idx_hit]
+    Vh = -D[idx_hit]
+    pids_h = best_pid[idx_hit]
+
+    # Garante normal voltada para o raio incidente
+    flip = np.sum(Nh * Vh, axis=1) < 0.0
+    Nh = np.where(flip[:, None], -Nh, Nh)
+
+    cor_h = np.zeros((idx_hit.shape[0], 3), dtype=np.float64)
+
+    # Luz Ambiente Global (Sub-quest 7.2)
+    Ia = (
+        np.array([0.16, 0.20, 0.32])
+        if (modo_noite or not ativar_sol)
+        else np.array([0.42, 0.45, 0.50])
+    )
+
+    # Parâmetros do Sol Direcional (Sub-quest Bônus 7.4)
+    sun_dir = np.array([-0.42, 0.82, -0.38])
+    sun_dir /= np.linalg.norm(sun_dir)
+    I_sun = (
+        np.array([0.18, 0.24, 0.42])
+        if modo_noite
+        else np.array([1.05, 1.00, 0.90])
+    )
+
+    # 4 Postes Pontuais (Sub-quest 7.1)
+    postes_pos = [
+        np.array([10.1, 6.32, 21.35]),
+        np.array([18.9, 6.32, 16.55]),
+        np.array([41.0, 6.32, 16.85]),
+        np.array([54.0, 6.32, 17.85]),
+    ]
+    I_poste = (
+        np.array([1.35, 1.18, 0.78])
+        if (modo_noite or not ativar_sol)
+        else np.array([0.22, 0.20, 0.15])
+    )
+
+    # Holofote Spot na Escultura Cinética + 3 Spots Submersos (Sub-quest Bônus 7.3)
+    spot_esc_pos = np.array([12.5, 4.8, 18.5])
+    spot_esc_dir = np.array([15.0, 1.8, 22.0]) - spot_esc_pos
+    spot_esc_dir /= np.linalg.norm(spot_esc_dir)
+
+    for prim in self.primitivas:
+      m_p = pids_h == prim.pid
+      if not np.any(m_p):
+        continue
+
+      Pp = Ph[m_p]
+      Np = Nh[m_p]
+      Vp = Vh[m_p]
+      mat = prim.material
+      kd = self._avaliar_textura(mat, Pp)
+
+      # Ambiente + Emissivo
+      acc = Ia * (kd * 0.55) + mat.emissivo
+
+      # 1. Sol Direcional (ligável/desligável!)
+      if ativar_sol:
+        ndotl = np.maximum(np.sum(Np * sun_dir, axis=1), 0.0)
+        if np.any(ndotl > 0.0):
+          sombra_sol = (
+              self._em_sombra(Pp, sun_dir, 120.0)
+              if ativar_sombras
+              else np.zeros(Pp.shape[0], dtype=bool)
+          )
+          vis = (~sombra_sol).astype(np.float64)
+          H_sun = sun_dir + Vp
+          H_sun /= np.linalg.norm(H_sun, axis=1, keepdims=True) + 1e-9
+          spec = np.power(np.maximum(np.sum(Np * H_sun, axis=1), 0.0), mat.shininess)
+          acc += vis[:, None] * I_sun * (
+              kd * ndotl[:, None] + mat.ke * spec[:, None] * 0.45
+          )
+
+      # 2. Luzes Pontuais dos 4 Postes
+      for p_luz in postes_pos:
+        L_vec = p_luz - Pp
+        dist = np.linalg.norm(L_vec, axis=1)
+        L_dir = L_vec / (dist[:, None] + 1e-9)
+        ndotl_p = np.maximum(np.sum(Np * L_dir, axis=1), 0.0)
+        aten = 1.0 / (1.0 + 0.045 * dist + 0.008 * dist * dist)
+        H_p = L_dir + Vp
+        H_p /= np.linalg.norm(H_p, axis=1, keepdims=True) + 1e-9
+        spec_p = np.power(np.maximum(np.sum(Np * H_p, axis=1), 0.0), mat.shininess)
+        acc += (aten * ndotl_p)[:, None] * I_poste * kd + (aten * spec_p)[:, None] * I_poste * mat.ke * 0.3
+
+      # 3. Holofotes / Spots (ligáveis/desligáveis!)
+      if ativar_spots:
+        # Spot direcional focado na Escultura Cinética
+        Ls_vec = spot_esc_pos - Pp
+        ds = np.linalg.norm(Ls_vec, axis=1)
+        Ls_dir = Ls_vec / (ds[:, None] + 1e-9)
+        cos_ang = np.sum(-Ls_dir * spot_esc_dir, axis=1)
+        in_cone = cos_ang > math.cos(math.radians(26.0))
+        if np.any(in_cone):
+          fator_spot = np.where(in_cone, np.power(np.maximum(cos_ang, 0.0), 4.0), 0.0)
+          ndotl_s = np.maximum(np.sum(Np * Ls_dir, axis=1), 0.0)
+          acc += (fator_spot * ndotl_s * 1.45)[:, None] * np.array([0.85, 0.95, 1.0]) * kd
+
+        # Cáusticas refrativas projetadas pelos 3 spots submersos da fonte
+        if ativar_caustics and prim.recebe_caustica:
+          px, py, pz = Pp[:, 0], Pp[:, 1], Pp[:, 2]
+          zona_c = (px >= 16.0) & (px <= 36.0) & (py >= 0.2) & (py <= 4.5) & (pz >= 16.5) & (pz <= 28.0)
+          if np.any(zona_c):
+            w1 = np.sin(px * 3.4 + py * 4.8 + pz * 2.1)
+            w2 = np.cos(px * 4.1 - py * 3.7 + pz * 3.3)
+            filamento = np.power(np.maximum(w1 * w2, 0.0), 3.0)
+            aten_y = np.exp(-np.maximum(py - 0.5, 0.0) * 0.45)
+            c_int = np.where(zona_c, filamento * aten_y * 0.85, 0.0)
+            acc += c_int[:, None] * np.array([0.35, 0.88, 1.0])
+
+      # 4. Reflexão Especular Recursiva (1 bounce)
+      if ativar_reflexos and profundidade == 0 and mat.refletividade > 0.05:
+        R_dir = D[idx_hit][m_p] - 2.0 * np.sum(D[idx_hit][m_p] * Np, axis=1, keepdims=True) * Np
+        R_dir /= np.linalg.norm(R_dir, axis=1, keepdims=True) + 1e-9
+        cor_refl, _, _, _ = self._sombrear_raios(
+            Pp + Np * 3e-3,
+            R_dir,
+            modo_noite=modo_noite,
+            ativar_caustics=False,
+            ativar_reflexos=False,
+            ativar_sombras=False,
+            ativar_sol=ativar_sol,
+            ativar_spots=ativar_spots,
+            profundidade=1,
+        )
+        acc = acc * (1.0 - mat.refletividade) + cor_refl * mat.refletividade
+
+      cor_h[m_p] = acc
+
+    cor[idx_hit] = np.clip(cor_h, 0.0, 1.0)
+    return cor, best_t, best_N, best_pid
 
   def renderizar_config(
       self,
@@ -2560,128 +1663,295 @@ class RenderizadorCT:
       ativar_caustics=True,
       ativar_reflexos=True,
       ativar_sombras=True,
-      incluir_objs=True,
-      ssaa=True,
+      ativar_sol=True,
+      ativar_spots=True,
+      ssaa=False,
   ):
-    t0 = time.time()
-    M_wc = construir_Mwc(cfg['eye'], cfg['at'], cfg['up'])
+    """Renderiza a imagem completa (W x H) e popula o Pick Buffer O(1)."""
+    W, H = self.W, self.H
+    Mcw = construir_Mcw(cfg["eye"], cfg["at"], cfg["up"])
+    R_cw = Mcw[:3, :3]
+    eye = np.asarray(cfg["eye"], dtype=np.float64)
 
-    for prim in self.cena:
-      prim.preparar_camera(M_wc)
+    xmin, xmax, ymin, ymax = cfg["win"]
+    d = float(cfg["d"])
+    proj = cfg.get("proj", "perspectiva")
 
-    dir_w = np.array([0.45, -0.75, 0.48, 0.0])
-    dir_c = (M_wc @ dir_w)[:3]
-    dir_c /= np.linalg.norm(dir_c)
+    # Coordenadas dos centros dos pixels na janela de projeção
+    us = xmin + (np.arange(W) + 0.5) * ((xmax - xmin) / W)
+    vs = ymax - (np.arange(H) + 0.5) * ((ymax - ymin) / H)
+    uu, vv = np.meshgrid(us, vs)
+    uu_flat = uu.ravel()
+    vv_flat = vv.ravel()
+    N_pix = W * H
 
-    intensidade_poste = (
-        np.array([1.45, 1.25, 0.85])
-        if modo_noite
-        else np.array([0.18, 0.18, 0.16])
-    )
-    postes_cam = []
-    for px_pos, pz_pos, off_lum_x in self.extras_3d['postes']:
-      pw = np.array([px_pos + off_lum_x, 6.1, pz_pos + 0.4, 1.0])
-      postes_cam.append(((M_wc @ pw)[:3], intensidade_poste))
+    if proj == "ortografica":
+      O_cam = np.stack([uu_flat, vv_flat, np.zeros(N_pix)], axis=1)
+      D_cam = np.tile(np.array([[0.0, 0.0, -1.0]]), (N_pix, 1))
+    elif proj == "obliqua":
+      # Projeção Oblíqua Gabinete (L = 0.5, alpha = 45°)
+      O_cam = np.stack([uu_flat, vv_flat, np.zeros(N_pix)], axis=1)
+      ang_ob = math.radians(45.0)
+      L_gab = 0.45
+      D_cam = np.tile(
+          np.array([[L_gab * math.cos(ang_ob), L_gab * math.sin(ang_ob), -1.0]]),
+          (N_pix, 1),
+      )
+      D_cam /= np.linalg.norm(D_cam, axis=1, keepdims=True)
+    else:
+      O_cam = np.zeros((N_pix, 3), dtype=np.float64)
+      D_cam = np.stack([uu_flat, vv_flat, np.full(N_pix, -d)], axis=1)
+      D_cam /= np.linalg.norm(D_cam, axis=1, keepdims=True)
 
-    spot_pos_w = np.array([18.5, 6.1, 16.2, 1.0])
-    spot_alvo_w = np.array([15.0, 2.2, 22.0, 1.0])
-    spot_pos_c = (M_wc @ spot_pos_w)[:3]
-    spot_dir_c = (M_wc @ (spot_alvo_w - spot_pos_w))[:3]
-    spot_dir_c /= np.linalg.norm(spot_dir_c)
+    O_world = (R_cw @ O_cam.T).T + eye
+    D_world = (R_cw @ D_cam.T).T
+    D_world /= np.linalg.norm(D_world, axis=1, keepdims=True)
 
-    luzes = {
-        'I_amb': (
-            np.array([0.06, 0.08, 0.14])
-            if modo_noite
-            else np.array([0.28, 0.29, 0.32])
-        ),
-        'dir_cam': dir_c,
-        'I_dir': (
-            np.array([0.0, 0.0, 0.0])
-            if modo_noite
-            else np.array([0.78, 0.76, 0.70])
-        ),
-        'postes_cam': postes_cam,
-        'spot_pos_cam': spot_pos_c,
-        'spot_dir_cam': spot_dir_c,
-        'spot_cos_cutoff': np.cos(np.deg2rad(42.0)),
-        'I_spot': (
-            np.array([1.85, 1.70, 1.35])
-            if modo_noite
-            else np.array([0.45, 0.45, 0.42])
-        ),
+    # Processa em fatias de linhas para manter baixo consumo de memória
+    img_flat = np.zeros((N_pix, 3), dtype=np.float64)
+    t_flat = np.full(N_pix, np.inf, dtype=np.float64)
+    N_flat = np.zeros((N_pix, 3), dtype=np.float64)
+    pid_flat = np.zeros(N_pix, dtype=np.int32)
+
+    chunk = W * 25
+    for start in range(0, N_pix, chunk):
+      end = min(start + chunk, N_pix)
+      c_blk, t_blk, n_blk, p_blk = self._sombrear_raios(
+          O_world[start:end],
+          D_world[start:end],
+          modo_noite=modo_noite,
+          ativar_caustics=ativar_caustics,
+          ativar_reflexos=ativar_reflexos,
+          ativar_sombras=ativar_sombras,
+          ativar_sol=ativar_sol,
+          ativar_spots=ativar_spots,
+      )
+      img_flat[start:end] = c_blk
+      t_flat[start:end] = t_blk
+      N_flat[start:end] = n_blk
+      pid_flat[start:end] = p_blk
+
+    # SSAA leve opcional nas bordas de contraste
+    if ssaa:
+      dx_w = (xmax - xmin) / (W * 2.0)
+      dy_w = (ymax - ymin) / (H * 2.0)
+      O_j = O_world + (R_cw @ np.array([dx_w, dy_w, 0.0]))
+      D_j = D_world
+      for start in range(0, N_pix, chunk):
+        end = min(start + chunk, N_pix)
+        c_j, _, _, _ = self._sombrear_raios(
+            O_j[start:end],
+            D_j[start:end],
+            modo_noite=modo_noite,
+            ativar_caustics=ativar_caustics,
+            ativar_reflexos=ativar_reflexos,
+            ativar_sombras=ativar_sombras,
+            ativar_sol=ativar_sol,
+            ativar_spots=ativar_spots,
+        )
+        img_flat[start:end] = 0.5 * (img_flat[start:end] + c_j)
+
+    # Salva Pick Buffer O(1)
+    P_flat = O_world + np.where(np.isfinite(t_flat), t_flat, 0.0)[:, None] * D_world
+    self.pick_buffer = {
+        "pid": pid_flat.reshape(H, W),
+        "t": t_flat.reshape(H, W),
+        "P": P_flat.reshape(H, W, 3),
+        "N": N_flat.reshape(H, W, 3),
     }
 
-    xmin, xmax, ymin, ymax = cfg['win']
-    d = cfg['d']
+    img_arr = img_flat.reshape(H, W, 3)
+    status_luz = f"{'Noite' if modo_noite else 'Dia'} | Sol: {'ON' if ativar_sol else 'OFF'} | Spots: {'ON' if ativar_spots else 'OFF'}"
+    legenda = f"{cfg['titulo']} ({W}×{H}px • {status_luz})"
+    return img_arr, legenda
 
-    offsets = (
-        [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)]
-        if ssaa
-        else [(0.0, 0.0)]
-    )
-    du = (xmax - xmin) / self.W
-    dv = (ymin - ymax) / self.H
+  def consultar_pick_buffer(self, px, py):
+    """Quest 12: Consulta instantânea O(1) do objeto atingido no pixel (px, py)."""
+    if self.pick_buffer is None:
+      return {"hit": False, "nome": "Nenhuma imagem renderizada", "descricao": ""}
 
-    u_base = np.linspace(xmin + 0.5 * du, xmax - 0.5 * du, self.W)
-    v_base = np.linspace(ymax + 0.5 * dv, ymin - 0.5 * dv, self.H)
+    px = int(np.clip(px, 0, self.W - 1))
+    py = int(np.clip(py, 0, self.H - 1))
+    pid = int(self.pick_buffer["pid"][py, px])
 
-    img_acum = np.zeros((self.H, self.W, 3), dtype=np.float64)
-    pick_capturado = False
+    if pid <= 0:
+      return {
+          "hit": False,
+          "nome": "Céu / Horizonte Atmosférico",
+          "descricao": "Raio primário não interceptou sólidos (t = ∞).",
+      }
 
-    for ox, oy in offsets:
-      U, V = np.meshgrid(u_base + ox * du, v_base + oy * dv)
-      if cfg['proj'] == 'perspectiva':
-        O_cam = np.zeros((self.H, self.W, 3), dtype=np.float64)
-        D_cam = np.stack([U, V, np.full_like(U, -d)], axis=-1)
-        D_cam /= np.linalg.norm(D_cam, axis=-1, keepdims=True)
-      elif cfg['proj'] == 'ortografica':
-        O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
-        D_cam = np.broadcast_to(np.array([0.0, 0.0, -1.0]), O_cam.shape).copy()
-      elif cfg['proj'] == 'obliqua':
-        O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
-        l_ob = 0.5
-        ang_ob = np.deg2rad(45.0)
-        d_vec = np.array([-l_ob * np.cos(ang_ob), -l_ob * np.sin(ang_ob), -1.0])
-        d_vec /= np.linalg.norm(d_vec)
-        D_cam = np.broadcast_to(d_vec, O_cam.shape).copy()
+    prim = next((p for p in self.primitivas if p.pid == pid), None)
+    if prim is None:
+      return {"hit": False, "nome": "Objeto Desconhecido", "descricao": ""}
 
-      t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min = self.tracar_raios(
-          O_cam, D_cam
-      )
+    dist = float(self.pick_buffer["t"][py, px])
+    P = self.pick_buffer["P"][py, px]
+    N = self.pick_buffer["N"][py, px]
+    kd = prim.material.kd
 
-      if not pick_capturado:
-        self.ultimo_pick_data = {
-            'obj_idx': obj_idx.copy(),
-            'sub_mat': sub_mat_min.copy(),
-            't_min': t_min.copy(),
-            'P_world': P_w_min.copy(),
-            'N_world': N_w_min.copy(),
-        }
-        pick_capturado = True
+    return {
+        "hit": True,
+        "pid": pid,
+        "nome": prim.nome,
+        "tipo_primitiva": prim.tipo,
+        "grupo": prim.grupo,
+        "material": prim.material.nome,
+        "distancia": dist,
+        "ponto_world": f"({P[0]:.2f}, {P[1]:.2f}, {P[2]:.2f})",
+        "normal_world": f"({N[0]:.2f}, {N[1]:.2f}, {N[2]:.2f})",
+        "kd": f"({kd[0]:.2f}, {kd[1]:.2f}, {kd[2]:.2f})",
+        "refletividade": prim.material.refletividade,
+        "transformacao": prim.transformacao_txt,
+        "descricao": prim.descricao,
+    }
 
-      img_sub = self.sombrear(
-          O_cam,
-          D_cam,
-          t_min,
-          N_min,
-          P_w_min,
-          obj_idx,
-          sub_mat_min,
-          N_w_min,
-          luzes,
-          modo_noite=modo_noite,
-          permitir_reflexo=ativar_reflexos,
-          ativar_sombras=ativar_sombras,
-          ativar_caustics=ativar_caustics,
-      )
-      img_acum += img_sub
-
-    img = np.clip(img_acum / len(offsets), 0.0, 1.0)
-    img = np.power(img, 1.0 / 1.12)
-    turno_txt = 'NOITE' if modo_noite else 'DIA'
-    aa_txt = ' | SSAA 4x' if ssaa else ''
-    return (
-        img,
-        f"{cfg['titulo']} [{turno_txt}{aa_txt}] ({self.W}x{self.H} em {time.time() - t0:.2f}s)",
-    )
+  def obter_status_quests(
+      self,
+      cfg_atual,
+      resolucao,
+      ativar_sombras=True,
+      ativar_sol=True,
+      ativar_spots=True,
+  ):
+    """Auditoria matemática automática das Quests (Atos I a VIII)."""
+    proj_atual = cfg_atual.get("proj", "perspectiva")
+    return {
+        "ato1": {
+            "titulo": "ATO I — A Construção do Mundo",
+            "items": [
+                (
+                    "Sub-quest 1.1 — Tudo Tem Um Propósito (Cenário Bloco 734 CT)",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    "Sub-quest 1.2 — O Primeiro Octante (X, Y, Z ≥ 0)",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    "Quest 2 — Zoo dos Objetos (Esfera, Cilindro, Cone, Caixa, Arco, Malha)",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    f"Sub-quest 3.1 — Diversidade ({len(self.materiais)} materiais ≥ 4)",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    "Sub-quest 3.2 — A Pele Pintada (Asfalto, Calçada, Água, Placa 734)",
+                    True,
+                    "Obrigatória",
+                ),
+            ],
+        },
+        "ato2": {
+            "titulo": "ATO II — As Transformações Mágicas",
+            "items": [
+                ("Quest 4 — O Ritual da Translação (4×4)", True, "Obrigatória"),
+                (
+                    "Sub-quest 5.1 — O Eixo Sagrado (Rotação X, Y, Z)",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    "Sub-quest 5.2 — O Eixo Livre (Quatérnios nas copas)",
+                    True,
+                    "Obrigatória",
+                ),
+                ("Quest 6 — O Encantamento da Escala", True, "Obrigatória"),
+                (
+                    "Quest Bônus 6.1 — A Distorção (Cisalhamento Abrigo)",
+                    True,
+                    "+0.5 pts",
+                ),
+                (
+                    "Quest Bônus 6.2 — O Reflexo Perfeito (Espelho Cones)",
+                    True,
+                    "+0.5 pts",
+                ),
+            ],
+        },
+        "ato3": {
+            "titulo": "ATO III — A Luz e a Escuridão",
+            "items": [
+                (
+                    "Sub-quest 7.1 — A Chama Pontual (4 Postes com atenuação)",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    "Sub-quest 7.2 — O Brilho Ambiente (Ia)",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    f"Sub-quest Bônus 7.3 — O Holofote (Spots: {'ON' if ativar_spots else 'OFF'})",
+                    ativar_spots,
+                    "+1.0 pts",
+                ),
+                (
+                    f"Sub-quest Bônus 7.4 — O Sol Direcional (Sol: {'ON' if ativar_sol else 'OFF'})",
+                    ativar_sol,
+                    "+0.5 pts",
+                ),
+            ],
+        },
+        "ato45": {
+            "titulo": "ATOS IV & V — Câmera e Projeções",
+            "items": [
+                (
+                    "Quests 8 e 9 — Eye, At, Up, Distância Focal (d) e Janela",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    "Quest 10 — Perspectiva (Presets Zoom In / Zoom Out)",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    "Bônus Pontos de Fuga — 1, 2 e 3 Pontos de Fuga",
+                    True,
+                    "+1.5 pts",
+                ),
+                (
+                    f"Bônus Projeções Alternativas — Isométrica / Oblíqua (Atual: {proj_atual})",
+                    True,
+                    "+1.0 pts",
+                ),
+            ],
+        },
+        "ato678": {
+            "titulo": "ATOS VI, VII & VIII — Sombras, Picking e Mosaico 500×500",
+            "items": [
+                (
+                    "Quest 11 — A Sombra (Sombras Projetadas)",
+                    ativar_sombras,
+                    "Obrigatória",
+                ),
+                (
+                    "Quest 12 — O Toque (Picking Interativo 3D & Render)",
+                    True,
+                    "Obrigatória",
+                ),
+                (
+                    "Bônus — Interface Gráfica Interativa (Streamlit + WebGL)",
+                    True,
+                    "+1.0 pts",
+                ),
+                (
+                    f"Quest 13 — O Mosaico de 500×500 (Atual: {resolucao}×{resolucao})",
+                    resolucao >= 500,
+                    "Obrigatória",
+                ),
+                (
+                    "Quest Lendária — Criatividade e Beleza (Cáusticas + Mini-Game)",
+                    True,
+                    "+1.0 pts",
+                ),
+            ],
+        },
+    }
