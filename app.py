@@ -1630,6 +1630,8 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   // ============================================================================
   // 8. JOGADOR ARTICULADO, MINI-QUESTS, VIGILANTES, MODO FOTO & QUIZ CRETO
   // ============================================================================
+  // CORREÇÃO: declarar lanternEnabled ANTES de usar no SpotLight
+  let lanternEnabled = MODO_NOITE;
   const player = criarAvatarRoblox(24.0, 0.2, 15.2, 0, 0x0284c7, 0xfacc15, 0x0f172a, 1.0);
   const xicaraMao = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.055, 0.13, 12), matPapel);
   xicaraMao.position.set(0, -0.38, 0.14);
@@ -1679,11 +1681,9 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   arBoxHelper.visible = false;
   scene.add(arBoxHelper);
   let arTimer = 0;
-
   let isPaused = false;
   let survivalMode = false;
-  let isDead = false;
-  let lanternEnabled = MODO_NOITE;
+  let isDead = false;  
   let inCoffeeCutscene = false;
   let coffeeTimer = 0;
   let inDanceCutscene = false;
@@ -3129,6 +3129,13 @@ with aba_webgl:
         ),
         height=735,
         scrolling=False,
+            return (
+        template
+        .replace("__MODO_NOITE__", "true" if modo_noite else "false")
+        .replace("__ATIVAR_SOL__", "true" if ativar_sol else "false")
+        .replace("__ATIVAR_SPOTS__", "true" if ativar_spots else "false")
+        + "\n</script>\n</body>\n</html>"
+        )
     )
 
 
