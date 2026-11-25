@@ -5,13 +5,13 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="Bloco 734 CT + Walkthrough + Inspeção 3D", layout="wide"
+    page_title="Bloco 734 CT + Dumb Ways Parkour + Inspeção 3D", layout="wide"
 )
-st.title("Visualizador 3D, Walkthrough & Ray Casting — Bloco 734 (CT)")
+st.title("Visualizador 3D, Dumb Ways Parkour & Ray Casting — Bloco 734 (CT)")
 
 
 @st.cache_resource
-def carregar_motor(resolucao=280):
+def carregar_motor(resolucao=420):
   return RenderizadorCT(largura=resolucao, altura=resolucao)
 
 
@@ -37,24 +37,40 @@ def gerar_mesh_box(xmin, xmax, ymin, ymax, zmin, zmax, cor, nome):
   )
 
 
-def converter_camera_para_plotly(cfg_cam):
-  """Converte eye e at do sistema do motor (X, Y_altura, Z_prof) para Plotly (X, Z, Y)."""
+def converter_camera_para_plotly(cfg_cam, azimute_deg=None, elevacao_deg=None):
+  """Câmera com aspecto isométrico real (sem achatamento) e elevação travada >= 0°."""
+  if azimute_deg is not None and elevacao_deg is not None:
+    az = np.deg2rad(azimute_deg)
+    el = np.deg2rad(np.clip(elevacao_deg, 2.0, 88.0))
+    r = 1.65
+    ex = r * np.cos(el) * np.cos(az)
+    ey = r * np.cos(el) * np.sin(az)
+    ez = max(0.06, r * np.sin(el))
+    proj_type = (
+        "orthographic"
+        if cfg_cam and cfg_cam.get("proj") in ("ortografica", "obliqua")
+        else "perspective"
+    )
+    return dict(
+        eye=dict(x=float(ex), y=float(ey), z=float(ez)),
+        center=dict(x=0.0, y=0.0, z=-0.12),
+        up=dict(x=0, y=0, z=1),
+        projection=dict(type=proj_type),
+    )
+
   eye = np.array(cfg_cam["eye"], dtype=float)
   at = np.array(cfg_cam["at"], dtype=float)
+  # Escala uniforme pelo maior eixo (66m) para preservar proporção real sem achatar
+  centro_cena = np.array([35.0, 31.0, 3.5])
+  escala_unif = 36.0
 
-  # Centro aproximado do bounding box da cena no Plotly
-  centro_cena = np.array([35.0, 31.0, 11.0])
-  escala_eixos = np.array([33.0, 29.0, 11.0])
+  eye_pl = np.array([eye[0], eye[2], max(eye[1], 1.2)])
+  at_pl = np.array([at[0], at[2], max(at[1], 1.0)])
 
-  eye_pl = np.array([eye[0], eye[2], eye[1]])
-  at_pl = np.array([at[0], at[2], at[1]])
-
-  cam_eye = (eye_pl - centro_cena) / escala_eixos
-  cam_center = (at_pl - centro_cena) / escala_eixos
-
-  # Ajusta fator de zoom conforme 'd' e janela
-  fator_zoom = 1.5 / max(float(cfg_cam.get("d", 1.5)), 0.5)
-  cam_eye = cam_center + (cam_eye - cam_center) * fator_zoom
+  cam_eye = (eye_pl - centro_cena) / escala_unif
+  cam_center = (at_pl - centro_cena) / escala_unif
+  # Garante que o olho da câmera nunca entre no quadrante inferior (z < 0.05)
+  cam_eye[2] = max(0.06, cam_eye[2])
 
   proj_type = (
       "orthographic"
@@ -72,13 +88,17 @@ def converter_camera_para_plotly(cfg_cam):
 
 
 def construir_figura_3d_interativa(
-    renderer, estilo="materiais", modo_noite=False, cfg_cam=None
+    renderer,
+    estilo="materiais",
+    modo_noite=False,
+    cfg_cam=None,
+    azimute_deg=None,
+    elevacao_deg=None,
 ):
   fig = go.Figure()
 
   if estilo == "wireframe":
     c_bloco = "#38BDF8" if modo_noite else "#0F172A"
-    c_teto = "#0284C7"
     c_vidro = "#38BDF8"
     c_734 = "#1D4ED8"
     c_asfalto, c_calcada, c_esc_aco, c_agua = (
@@ -89,7 +109,6 @@ def construir_figura_3d_interativa(
     )
   elif estilo == "shaded":
     c_bloco = "#334155" if modo_noite else "#CBD5E1"
-    c_teto = "#1E293B" if modo_noite else "#94A3B8"
     c_vidro = "#0F172A" if modo_noite else "#64748B"
     c_734 = "#1E3A8A" if modo_noite else "#475569"
     c_asfalto, c_calcada, c_esc_aco, c_agua = (
@@ -100,12 +119,7 @@ def construir_figura_3d_interativa(
     )
   else:
     if modo_noite:
-      c_bloco, c_teto, c_vidro, c_734 = (
-          "#3B4D6B",
-          "#1E293B",
-          "#090D16",
-          "#1D4ED8",
-      )
+      c_bloco, c_vidro, c_734 = "#3B4D6B", "#090D16", "#1D4ED8"
       c_asfalto, c_calcada, c_esc_aco, c_agua = (
           "#111827",
           "#334155",
@@ -113,12 +127,7 @@ def construir_figura_3d_interativa(
           "#06B6D4",
       )
     else:
-      c_bloco, c_teto, c_vidro, c_734 = (
-          "#F8FAFC",
-          "#E2E8F0",
-          "#1E293B",
-          "#1E3A8A",
-      )
+      c_bloco, c_vidro, c_734 = "#F8FAFC", "#1E293B", "#1E3A8A"
       c_asfalto, c_calcada, c_esc_aco, c_agua = (
           "#334155",
           "#CBD5E1",
@@ -141,7 +150,7 @@ def construir_figura_3d_interativa(
           )
       )
 
-  # 2. Bloco 734 (Fachada Curva, Teto, Esquadrias, Vidros e Letreiro 734)
+  # 2. Bloco 734
   cx, cz, R, H = 37.0, 42.0, 22.0, 6.6
   thetas = np.linspace(np.pi, 1.5 * np.pi, 32)
   arco_x = cx + R * np.cos(thetas)
@@ -210,7 +219,7 @@ def construir_figura_3d_interativa(
         )
     )
 
-  # Janelas e Porta de Vidro Fumê no Arco
+  # Janelas, Porta, Escada e Letreiro 734
   for idx_j in range(9):
     s0 = 0.24 + (idx_j + 0.16) * (0.72 / 9.0)
     s1 = 0.24 + (idx_j + 0.84) * (0.72 / 9.0)
@@ -227,12 +236,11 @@ def construir_figura_3d_interativa(
         cz - (R + 0.06) * np.sin(ang1),
         cz - (R + 0.06) * np.sin(ang0),
     ]
-    jy = [1.35, 1.35, 3.25, 3.25]
     fig.add_trace(
         go.Mesh3d(
             x=jx,
             y=jz,
-            z=jy,
+            z=[1.35, 1.35, 3.25, 3.25],
             i=[0, 0],
             j=[1, 2],
             k=[2, 3],
@@ -241,7 +249,6 @@ def construir_figura_3d_interativa(
         )
     )
 
-  # Porta Principal
   ang_p0, ang_p1 = 0.06 * (np.pi / 2.0), 0.20 * (np.pi / 2.0)
   px_p = [
       cx - (R + 0.06) * np.cos(ang_p0),
@@ -268,7 +275,12 @@ def construir_figura_3d_interativa(
       )
   )
 
-  # Letreiro "734" na Platibanda
+  fig.add_trace(
+      gerar_mesh_box(
+          59.05, 59.65, 0.20, 6.80, 23.4, 24.6, "#F59E0B", "Escada Acesso Telhado"
+      )
+  )
+
   ang_734 = 0.14 * (np.pi / 2.0)
   fig.add_trace(
       go.Scatter3d(
@@ -282,7 +294,7 @@ def construir_figura_3d_interativa(
       )
   )
 
-  # 3. Fonte / Espelho d'Água + Bordas
+  # 3. Fonte / Espelho d'Água
   f_inf = renderer.extras_3d["fonte"]
   fx0, fx1, fz0, fz1, ya = (
       f_inf["x_min"],
@@ -358,7 +370,7 @@ def construir_figura_3d_interativa(
               z=[py_e],
               mode="markers",
               marker=dict(
-                  size=20, color="#064E3B" if modo_noite else cor_e, opacity=0.92
+                  size=18, color="#064E3B" if modo_noite else cor_e, opacity=0.92
               ),
               name=f"Copa Árvore {idx_a}",
           )
@@ -429,14 +441,13 @@ def construir_figura_3d_interativa(
 
   bg_color = "#0B1120" if modo_noite else "#F8FAFC"
   txt_color = "#E2E8F0" if modo_noite else "#0F172A"
-  camera_plotly = (
-      converter_camera_para_plotly(cfg_cam)
-      if cfg_cam
-      else dict(eye=dict(x=-1.4, y=-1.4, z=0.65))
+  camera_plotly = converter_camera_para_plotly(
+      cfg_cam, azimute_deg=azimute_deg, elevacao_deg=elevacao_deg
   )
 
+  # Proporção real 1:1:1 (aspectmode="data" sem faixa gigante abaixo de Y=0)
   fig.update_layout(
-      height=600,
+      height=620,
       margin=dict(l=0, r=0, t=20, b=0),
       paper_bgcolor=bg_color,
       font=dict(color=txt_color),
@@ -448,7 +459,7 @@ def construir_figura_3d_interativa(
           camera=camera_plotly,
           xaxis=dict(title="X (m)", range=[2, 68]),
           yaxis=dict(title="Z (m)", range=[2, 60]),
-          zaxis=dict(title="Y (m)", range=[0, 22]),
+          zaxis=dict(title="Altura Y (m)", range=[0, 12]),
       ),
   )
   return fig
@@ -464,70 +475,116 @@ def renderizar_walkthrough_webgl(modo_noite=False):
 <style>
   body {{ margin: 0; overflow: hidden; background: #0B1120; font-family: system-ui, -apple-system, sans-serif; user-select: none; }}
   #hud {{
-    position: absolute; top: 14px; left: 14px; z-index: 10;
-    background: rgba(15, 23, 42, 0.85); color: #F8FAFC;
-    padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.35);
-    backdrop-filter: blur(6px); max-width: 380px; font-size: 13px; line-height: 1.5;
+    position: absolute; top: 12px; left: 12px; z-index: 10;
+    background: rgba(15, 23, 42, 0.88); color: #F8FAFC;
+    padding: 12px 15px; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.35);
+    backdrop-filter: blur(6px); max-width: 390px; font-size: 12.5px; line-height: 1.45;
   }}
   #hud b {{ color: #38BDF8; }}
-  .danger-txt {{ color: #F87171; font-weight: 700; }}
   .btn-cam {{
-    margin-top: 8px; margin-right: 6px; padding: 6px 10px;
+    margin-top: 7px; margin-right: 5px; padding: 5px 9px;
     background: #1E293B; color: #F8FAFC; border: 1px solid #475569;
-    border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;
+    border-radius: 6px; cursor: pointer; font-size: 11.5px; font-weight: 600;
   }}
   .btn-cam:hover {{ background: #0284C7; border-color: #38BDF8; }}
+
+  #stations-panel {{
+    position: absolute; top: 12px; right: 12px; z-index: 10;
+    background: rgba(15, 23, 42, 0.88); color: #F8FAFC;
+    padding: 12px 15px; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.35);
+    backdrop-filter: blur(6px); width: 270px; font-size: 12px; line-height: 1.55;
+  }}
+  .st-title {{ font-weight: 800; color: #FACC15; font-size: 13px; margin-bottom: 6px; }}
+  .st-item {{ display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding: 2px 0; }}
+  .st-done {{ color: #4ADE80; font-weight: 700; }}
+  .st-todo {{ color: #94A3B8; }}
+
+  #prompt-box {{
+    display: none; position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); z-index: 15;
+    background: rgba(2, 132, 199, 0.92); color: #FFFFFF; padding: 9px 18px;
+    border-radius: 999px; font-weight: 700; font-size: 13.5px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5); border: 1px solid #7DD3FC;
+  }}
+
+  #toxic-bar-wrap {{
+    display: none; position: absolute; bottom: 95px; left: 50%; transform: translateX(-50%); z-index: 15;
+    background: rgba(15,23,42,0.9); padding: 8px 14px; border-radius: 8px; border: 1px solid #22D3EE; width: 240px; text-align: center;
+  }}
+  #toxic-bar {{ height: 10px; background: #06B6D4; width: 0%; border-radius: 4px; transition: width 0.05s; }}
+
   #coords {{
-    position: absolute; bottom: 12px; right: 14px; z-index: 10;
-    background: rgba(15, 23, 42, 0.82); color: #E2E8F0;
+    position: absolute; bottom: 12px; right: 12px; z-index: 10;
+    background: rgba(15, 23, 42, 0.85); color: #E2E8F0;
     padding: 6px 12px; border-radius: 8px; font-family: monospace; font-size: 12px;
   }}
+
   #wasted-overlay {{
     display: none; position: absolute; inset: 0; z-index: 30;
-    background: radial-gradient(circle, rgba(127,29,29,0.45) 0%, rgba(15,23,42,0.88) 100%);
+    background: radial-gradient(circle, rgba(127,29,29,0.52) 0%, rgba(15,23,42,0.90) 100%);
     flex-direction: column; align-items: center; justify-content: center; text-align: center;
   }}
-  #wasted-title {{
-    font-size: 56px; font-weight: 900; color: #EF4444;
-    text-shadow: 0 4px 20px rgba(0,0,0,0.9); letter-spacing: 3px;
-  }}
-  #wasted-sub {{
-    font-size: 20px; color: #FCA5A5; margin-top: 6px; font-weight: 600;
-  }}
+  #wasted-title {{ font-size: 52px; font-weight: 900; color: #EF4444; text-shadow: 0 4px 20px rgba(0,0,0,0.9); letter-spacing: 2px; }}
+  #wasted-sub {{ font-size: 19px; color: #FCA5A5; margin-top: 8px; font-weight: 600; max-width: 520px; }}
   #btn-respawn {{
-    margin-top: 22px; padding: 12px 26px; font-size: 16px; font-weight: 700;
+    margin-top: 22px; padding: 12px 26px; font-size: 15px; font-weight: 700;
     background: #EF4444; color: white; border: none; border-radius: 8px; cursor: pointer;
-    box-shadow: 0 4px 14px rgba(239,68,68,0.5);
   }}
-  #btn-respawn:hover {{ background: #DC2626; }}
+
+  #victory-banner {{
+    display: none; position: absolute; top: 80px; left: 50%; transform: translateX(-50%); z-index: 25;
+    background: linear-gradient(135deg, #16A34A, #0284C7); color: white;
+    padding: 14px 26px; border-radius: 12px; font-weight: 800; font-size: 17px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.6); text-align: center;
+  }}
+  #flash-foto {{
+    display: none; position: absolute; inset: 0; z-index: 28; background: white; opacity: 0.85; pointer-events: none;
+  }}
 </style>
 </head>
 <body>
 <div id="hud">
-  <div style="font-size:15px; font-weight:700; margin-bottom:4px;">Walkthrough 3D — Bloco 734 (60 FPS)</div>
-  <div><b>W A S D</b> / <b>Setas</b>: Andar &nbsp;|&nbsp; <b>Shift</b>: Correr &nbsp;|&nbsp; <b>Espaço</b>: Pular</div>
-  <div><b>Mouse</b>: Arraste para girar &nbsp;|&nbsp; <span class="danger-txt">Cuidado com Carros e Escultura!</span></div>
+  <div style="font-size:14.5px; font-weight:800; margin-bottom:4px;">Walkthrough & Parkour — Bloco 734</div>
+  <div><b>WASD / Setas</b>: Andar &nbsp;|&nbsp; <b>Shift</b>: Correr &nbsp;|&nbsp; <b>Espaço</b>: Pular</div>
+  <div><b>Segurar E</b>: Escalar Árvore, Poste ou Escada &nbsp;|&nbsp; <b>F</b>: Fotografar</div>
   <div>
-    <button class="btn-cam" onclick="setCameraMode('third')">3ª Pessoa (Roblox)</button>
+    <button class="btn-cam" onclick="setCameraMode('third')">3ª Pessoa</button>
     <button class="btn-cam" onclick="setCameraMode('iso')">Isométrica</button>
     <button class="btn-cam" onclick="resetPlayer()">Renascer (R)</button>
   </div>
 </div>
 
+<div id="stations-panel">
+  <div class="st-title">ESTAÇÕES PARKOUR (0/6)</div>
+  <div class="st-item"><span>1. Foto da Escultura (F)</span><span id="st-foto" class="st-todo">PENDENTE</span></div>
+  <div class="st-item"><span>2. Fonte Rápida (&lt;3.5s)</span><span id="st-fonte" class="st-todo">PENDENTE</span></div>
+  <div class="st-item"><span>3. Escalar Poste (E)</span><span id="st-poste" class="st-todo">PENDENTE</span></div>
+  <div class="st-item"><span>4. Escalar Árvore (E)</span><span id="st-arvore" class="st-todo">PENDENTE</span></div>
+  <div class="st-item"><span>5. Atravessar Rua & Voltar</span><span id="st-rua" class="st-todo">PENDENTE</span></div>
+  <div class="st-item"><span>6. Telhado pela Escada (E)</span><span id="st-telhado" class="st-todo">PENDENTE</span></div>
+</div>
+
+<div id="prompt-box">Ação disponível</div>
+<div id="toxic-bar-wrap">
+  <div style="color:#67E8F9; font-size:11px; font-weight:700; margin-bottom:4px;">ÁGUA CONTAMINADA! SAIA JÁ!</div>
+  <div id="toxic-bar"></div>
+</div>
+<div id="victory-banner">PARABÉNS! VOCÊ COMPLETOU TODAS AS 6 ESTAÇÕES DO BLOCO 734!</div>
+<div id="flash-foto"></div>
+
 <div id="wasted-overlay">
   <div id="wasted-title">DUMB WAYS TO DIE</div>
-  <div id="wasted-sub" id="death-reason">Você encostou em um objeto perigoso!</div>
+  <div id="wasted-sub">Você encontrou um fim trágico!</div>
   <button id="btn-respawn" onclick="resetPlayer()">RENASCER AGORA (Tecla R)</button>
 </div>
 
-<div id="coords">Mortes: 0 | X=14.0 | Z=14.0</div>
+<div id="coords">Mortes: 0 | X=14.0 | Y=0.2 | Z=14.0</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
   const MODO_NOITE = {noite_js};
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(MODO_NOITE ? 0x070d19 : 0x93c5fd);
-  scene.fog = new THREE.FogExp2(MODO_NOITE ? 0x070d19 : 0x93c5fd, 0.0085);
+  scene.fog = new THREE.FogExp2(MODO_NOITE ? 0x070d19 : 0x93c5fd, 0.008);
 
   const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 300);
   const renderer = new THREE.WebGLRenderer({{ antialias: true }});
@@ -536,250 +593,150 @@ def renderizar_walkthrough_webgl(modo_noite=False):
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
-  const hemiLight = new THREE.HemisphereLight(
-    MODO_NOITE ? 0x1e293b : 0xffffff,
-    MODO_NOITE ? 0x0f172a : 0x64748b,
-    MODO_NOITE ? 0.45 : 0.85
-  );
-  scene.add(hemiLight);
-
+  scene.add(new THREE.HemisphereLight(MODO_NOITE ? 0x1e293b : 0xffffff, MODO_NOITE ? 0x0f172a : 0x64748b, MODO_NOITE ? 0.5 : 0.85));
   const dirLight = new THREE.DirectionalLight(MODO_NOITE ? 0x3b82f6 : 0xfffbeb, MODO_NOITE ? 0.25 : 1.15);
   dirLight.position.set(12, 32, 10);
   dirLight.castShadow = true;
   dirLight.shadow.mapSize.width = 2048;
   dirLight.shadow.mapSize.height = 2048;
-  const dCam = 45;
-  dirLight.shadow.camera.left = -dCam;
-  dirLight.shadow.camera.right = dCam;
-  dirLight.shadow.camera.top = dCam;
-  dirLight.shadow.camera.bottom = -dCam;
+  dirLight.shadow.camera.left = -45; dirLight.shadow.camera.right = 45;
+  dirLight.shadow.camera.top = 45; dirLight.shadow.camera.bottom = -45;
   scene.add(dirLight);
 
-  // Via Asfáltica e Calçada
-  const via = new THREE.Mesh(
-    new THREE.BoxGeometry(66, 0.1, 14),
-    new THREE.MeshStandardMaterial({{ color: 0x1e293b, roughness: 0.85 }})
-  );
-  via.position.set(35, 0.05, 9);
-  via.receiveShadow = true;
-  scene.add(via);
+  // Via e Calçada
+  const via = new THREE.Mesh(new THREE.BoxGeometry(66, 0.1, 14), new THREE.MeshStandardMaterial({{ color: 0x1e293b, roughness: 0.85 }}));
+  via.position.set(35, 0.05, 9); via.receiveShadow = true; scene.add(via);
 
   for (let fx = 4; fx < 66; fx += 4.5) {{
-    const faixa = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 0.02, 0.18),
-      new THREE.MeshBasicMaterial({{ color: 0xfacc15 }})
-    );
-    faixa.position.set(fx, 0.11, 11.7);
-    scene.add(faixa);
+    const faixa = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.02, 0.18), new THREE.MeshBasicMaterial({{ color: 0xfacc15 }}));
+    faixa.position.set(fx, 0.11, 11.7); scene.add(faixa);
   }}
 
-  const calcada = new THREE.Mesh(
-    new THREE.BoxGeometry(66, 0.2, 44),
-    new THREE.MeshStandardMaterial({{ color: MODO_NOITE ? 0x334155 : 0xcbd5e1, roughness: 0.9 }})
-  );
-  calcada.position.set(35, 0.1, 38);
-  calcada.receiveShadow = true;
-  scene.add(calcada);
+  const calcada = new THREE.Mesh(new THREE.BoxGeometry(66, 0.2, 44), new THREE.MeshStandardMaterial({{ color: MODO_NOITE ? 0x334155 : 0xcbd5e1, roughness: 0.9 }}));
+  calcada.position.set(35, 0.1, 38); calcada.receiveShadow = true; scene.add(calcada);
+
+  // Plataforma Objetivo do Outro Lado da Rua (Estação 5)
+  const platRua = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 0.12, 24), new THREE.MeshStandardMaterial({{ color: 0x22c55e, emissive: 0x15803d, emissiveIntensity: 0.4 }}));
+  platRua.position.set(27.0, 0.12, 3.2); scene.add(platRua);
+
+  // Zona Fotográfica da Escultura (Estação 1)
+  const platFoto = new THREE.Mesh(new THREE.RingGeometry(1.0, 1.35, 24), new THREE.MeshBasicMaterial({{ color: 0x38bdf8, side: THREE.DoubleSide }}));
+  platFoto.rotation.x = -Math.PI / 2;
+  platFoto.position.set(11.5, 0.22, 18.0); scene.add(platFoto);
 
   // Bloco 734
   const shapeBloco = new THREE.Shape();
   const cx = 37, cz = 42, R = 22, H = 6.6;
-  shapeBloco.moveTo(15, -53);
-  shapeBloco.lineTo(15, -42);
+  shapeBloco.moveTo(15, -53); shapeBloco.lineTo(15, -42);
   shapeBloco.absarc(cx, -cz, R, Math.PI, 0.5 * Math.PI, true);
-  shapeBloco.lineTo(59, -20);
-  shapeBloco.lineTo(59, -53);
-  shapeBloco.closePath();
+  shapeBloco.lineTo(59, -20); shapeBloco.lineTo(59, -53); shapeBloco.closePath();
 
   const extrudeGeo = new THREE.ExtrudeGeometry(shapeBloco, {{ depth: H, bevelEnabled: false, curveSegments: 32 }});
   extrudeGeo.rotateX(-Math.PI / 2);
-  const meshBloco = new THREE.Mesh(
-    extrudeGeo,
-    new THREE.MeshStandardMaterial({{ color: MODO_NOITE ? 0x475569 : 0xf8fafc, roughness: 0.45 }})
-  );
-  meshBloco.position.y = 0.2;
-  meshBloco.castShadow = true;
-  meshBloco.receiveShadow = true;
-  scene.add(meshBloco);
+  const meshBloco = new THREE.Mesh(extrudeGeo, new THREE.MeshStandardMaterial({{ color: MODO_NOITE ? 0x475569 : 0xf8fafc, roughness: 0.45 }}));
+  meshBloco.position.y = 0.2; meshBloco.castShadow = true; meshBloco.receiveShadow = true; scene.add(meshBloco);
 
+  // Escada Lateral para o Telhado (X=59.35, Z=24.0)
+  const escadaGroup = new THREE.Group();
+  escadaGroup.position.set(59.35, 0.2, 24.0);
+  const trilho1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 6.8, 0.12), new THREE.MeshStandardMaterial({{ color: 0xf59e0b }}));
+  trilho1.position.set(0, 3.4, -0.45); escadaGroup.add(trilho1);
+  const trilho2 = trilho1.clone(); trilho2.position.z = 0.45; escadaGroup.add(trilho2);
+  for (let deg = 0.4; deg <= 6.6; deg += 0.45) {{
+    const degrau = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.9), new THREE.MeshStandardMaterial({{ color: 0xfbbf24 }}));
+    degrau.position.set(0, deg, 0); escadaGroup.add(degrau);
+  }}
+  scene.add(escadaGroup);
+
+  // Janelas
   for (let i = 0; i < 9; i++) {{
     const ang = Math.PI + ((i + 0.5) / 9) * (Math.PI * 0.44) + 0.08;
     const vx = cx + (R + 0.05) * Math.cos(ang);
     const vz = cz + (R + 0.05) * Math.sin(ang);
-    const janela = new THREE.Mesh(
-      new THREE.BoxGeometry(1.7, 1.9, 0.15),
-      new THREE.MeshStandardMaterial({{ color: 0x0f172a, metalness: 0.85, roughness: 0.15 }})
-    );
-    janela.position.set(vx, 2.3, vz);
-    janela.lookAt(cx, 2.3, cz);
-    scene.add(janela);
+    const janela = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.9, 0.15), new THREE.MeshStandardMaterial({{ color: 0x0f172a, metalness: 0.85, roughness: 0.15 }}));
+    janela.position.set(vx, 2.3, vz); janela.lookAt(cx, 2.3, cz); scene.add(janela);
   }}
 
-  // Espelho d'Água / Fonte
-  const bordaFonte = new THREE.Mesh(
-    new THREE.BoxGeometry(15.4, 0.34, 6.4),
-    new THREE.MeshStandardMaterial({{ color: 0x1e293b, roughness: 0.4 }})
+  // Fonte Contaminada (Parada)
+  const bordaFonte = new THREE.Mesh(new THREE.BoxGeometry(15.4, 0.34, 6.4), new THREE.MeshStandardMaterial({{ color: 0x1e293b, roughness: 0.4 }}));
+  bordaFonte.position.set(27, 0.37, 19.8); bordaFonte.castShadow = true; scene.add(bordaFonte);
+  const laminaAgua = new THREE.Mesh(
+    new THREE.BoxGeometry(14.8, 0.1, 5.8),
+    new THREE.MeshStandardMaterial({{ color: 0x14b8a6, emissive: 0x0d9488, emissiveIntensity: 0.35, roughness: 0.15 }})
   );
-  bordaFonte.position.set(27, 0.37, 19.8);
-  bordaFonte.castShadow = true;
-  scene.add(bordaFonte);
+  laminaAgua.position.set(27, 0.51, 19.8); scene.add(laminaAgua);
 
-  const aguaMat = new THREE.MeshStandardMaterial({{
-    color: 0x06b6d4, emissive: MODO_NOITE ? 0x0891b2 : 0x000000,
-    emissiveIntensity: MODO_NOITE ? 0.65 : 0.0, roughness: 0.1, metalness: 0.6
-  }});
-  const laminaAgua = new THREE.Mesh(new THREE.BoxGeometry(14.8, 0.1, 5.8), aguaMat);
-  laminaAgua.position.set(27, 0.51, 19.8);
-  scene.add(laminaAgua);
-
-  if (MODO_NOITE) {{
-    const luzFonte = new THREE.PointLight(0x22d3ee, 2.4, 18);
-    luzFonte.position.set(27, 1.5, 19.8);
-    scene.add(luzFonte);
-  }}
-
-  // Escultura Cinética (OBRA DE ARTE LETAL!)
+  // Escultura Cinética (Letal ao toque)
   const grupoEsc = new THREE.Group();
   grupoEsc.position.set(15.0, 0.2, 22.0);
   grupoEsc.rotation.y = THREE.MathUtils.degToRad(-24);
-  const baseEsc = new THREE.Mesh(
-    new THREE.BoxGeometry(3.2, 0.28, 3.4),
-    new THREE.MeshStandardMaterial({{ color: 0x64748b, roughness: 0.8 }})
-  );
-  baseEsc.position.y = 0.14;
-  baseEsc.castShadow = true;
-  grupoEsc.add(baseEsc);
-
+  const baseEsc = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.28, 3.4), new THREE.MeshStandardMaterial({{ color: 0x64748b }}));
+  baseEsc.position.y = 0.14; grupoEsc.add(baseEsc);
   for (let k = 0; k < 5; k++) {{
-    const fc = k - 2;
-    const L = 2.35 * (1 - 0.055 * fc);
-    const frameGroup = new THREE.Group();
-    const bars = [
-      [0, L/2, L, 0.14], [0, -L/2, L, 0.14],
-      [L/2, 0, 0.14, L], [-L/2, 0, 0.14, L]
-    ];
-    bars.forEach(([bx, by, bw, bh]) => {{
-      const bar = new THREE.Mesh(
-        new THREE.BoxGeometry(bw, bh, 0.16),
-        new THREE.MeshStandardMaterial({{ color: 0xf8fafc, metalness: 0.3, roughness: 0.25 }})
-      );
-      bar.position.set(bx, by, 0);
-      bar.castShadow = true;
-      frameGroup.add(bar);
+    const fc = k - 2; const L = 2.35 * (1 - 0.055 * fc);
+    const fg = new THREE.Group();
+    [[0, L/2, L, 0.14], [0, -L/2, L, 0.14], [L/2, 0, 0.14, L], [-L/2, 0, 0.14, L]].forEach(([bx, by, bw, bh]) => {{
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.16), new THREE.MeshStandardMaterial({{ color: 0xf8fafc, metalness: 0.3 }}));
+      bar.position.set(bx, by, 0); fg.add(bar);
     }});
-    frameGroup.rotation.z = Math.PI / 4;
-    frameGroup.position.set(fc * 0.22, 0.28 + (L / Math.SQRT2) + 0.05, (k - 2) * 0.58);
-    grupoEsc.add(frameGroup);
+    fg.rotation.z = Math.PI / 4;
+    fg.position.set(fc * 0.22, 0.28 + (L / Math.SQRT2) + 0.05, (k - 2) * 0.58);
+    grupoEsc.add(fg);
   }}
   scene.add(grupoEsc);
 
-  // Lista de Obstáculos Sólidos (Colisão)
-  const obstaculosCilindricos = [];
-  const obstaculosCaixas = [
-    // Fonte
-    {{ minX: 19.0, maxX: 35.0, minZ: 16.3, maxZ: 23.3 }},
-    // Abrigo Metálico
-    {{ minX: 44.3, maxX: 49.2, minZ: 17.0, maxZ: 20.6 }}
-  ];
-
-  // Árvores e Postes (com colisão registrada)
+  // Árvores e Postes com Fio Descascado
   const arvores = [[10.5, 28.5, 1.15], [11.5, 38.0, 1.25], [37.5, 17.5, 0.9]];
   arvores.forEach(([ax, az, esc]) => {{
-    const tronco = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2 * esc, 0.28 * esc, 3.2 * esc, 10),
-      new THREE.MeshStandardMaterial({{ color: 0x5c3a21 }})
-    );
-    tronco.position.set(ax, 0.2 + 1.6 * esc, az);
-    tronco.castShadow = true;
-    scene.add(tronco);
-
-    const copa = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(1.9 * esc, 1),
-      new THREE.MeshStandardMaterial({{ color: MODO_NOITE ? 0x064e3b : 0x16a34a, roughness: 0.8 }})
-    );
-    copa.position.set(ax, 3.8 * esc, az);
-    copa.castShadow = true;
-    scene.add(copa);
-    obstaculosCilindricos.push({{ x: ax, z: az, r: 0.65 * esc }});
+    const tronco = new THREE.Mesh(new THREE.CylinderGeometry(0.22 * esc, 0.3 * esc, 3.6 * esc, 10), new THREE.MeshStandardMaterial({{ color: 0x5c3a21 }}));
+    tronco.position.set(ax, 0.2 + 1.8 * esc, az); tronco.castShadow = true; scene.add(tronco);
+    const copa = new THREE.Mesh(new THREE.DodecahedronGeometry(1.95 * esc, 1), new THREE.MeshStandardMaterial({{ color: MODO_NOITE ? 0x064e3b : 0x16a34a }}));
+    copa.position.set(ax, 4.1 * esc, az); copa.castShadow = true; scene.add(copa);
   }});
 
   const postes = [[9.5, 21.0, 0.6], [18.5, 16.2, 0.4], [41.0, 16.5, 0.0], [54.5, 17.5, -0.5]];
+  const faiscas = [];
   postes.forEach(([px, pz, ox]) => {{
-    const mastro = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.1, 6.2, 8),
-      new THREE.MeshStandardMaterial({{ color: 0x334155 }})
-    );
-    mastro.position.set(px, 3.3, pz);
-    mastro.castShadow = true;
-    scene.add(mastro);
-
-    const lum = new THREE.Mesh(
-      new THREE.SphereGeometry(0.28, 12, 12),
-      new THREE.MeshBasicMaterial({{ color: MODO_NOITE ? 0xfef08a : 0xe2e8f0 }})
-    );
-    lum.position.set(px + ox, 6.3, pz + 0.4);
-    scene.add(lum);
-
-    if (MODO_NOITE) {{
-      const pLight = new THREE.PointLight(0xfde047, 1.8, 22);
-      pLight.position.set(px + ox, 6.0, pz + 0.4);
-      scene.add(pLight);
-    }}
-    obstaculosCilindricos.push({{ x: px, z: pz, r: 0.45 }});
+    const mastro = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 6.2, 8), new THREE.MeshStandardMaterial({{ color: 0x334155 }}));
+    mastro.position.set(px, 3.3, pz); scene.add(mastro);
+    const lum = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12), new THREE.MeshBasicMaterial({{ color: 0xfef08a }}));
+    lum.position.set(px + ox, 6.3, pz + 0.4); scene.add(lum);
+    // Fio desencapado piscando no topo do poste
+    const fio = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), new THREE.MeshBasicMaterial({{ color: 0x38bdf8 }}));
+    fio.position.set(px, 5.9, pz); scene.add(fio);
+    faiscas.push(fio);
   }});
 
-  // Abrigo metálico visual
-  const abrigoTeto = new THREE.Mesh(
-    new THREE.BoxGeometry(4.6, 0.2, 3.3),
-    new THREE.MeshStandardMaterial({{ color: 0x94a3b8, metalness: 0.6, roughness: 0.3 }})
-  );
-  abrigoTeto.position.set(46.7, 2.6, 18.8);
-  abrigoTeto.rotation.z = -0.12;
-  abrigoTeto.castShadow = true;
-  scene.add(abrigoTeto);
-
-  // Carros em movimento na Via (LETAL AO TOQUE!)
+  // Carros em movimento na Via
   function criarCarro(x, z, rotY, cor, velX) {{
     const g = new THREE.Group();
-    const chassi = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.65, 4.3), new THREE.MeshStandardMaterial({{ color: cor, metalness: 0.5, roughness: 0.25 }}));
-    chassi.position.y = 0.55; chassi.castShadow = true; g.add(chassi);
-    const cabine = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.55, 2.2), new THREE.MeshStandardMaterial({{ color: 0x0f172a, roughness: 0.15 }}));
-    cabine.position.set(0, 1.1, -0.15); cabine.castShadow = true; g.add(cabine);
-    g.position.set(x, 0.1, z);
-    g.rotation.y = rotY;
-    scene.add(g);
+    const chassi = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.65, 4.3), new THREE.MeshStandardMaterial({{ color: cor, metalness: 0.5 }}));
+    chassi.position.y = 0.55; g.add(chassi);
+    const cabine = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.55, 2.2), new THREE.MeshStandardMaterial({{ color: 0x0f172a }}));
+    cabine.position.set(0, 1.1, -0.15); g.add(cabine);
+    g.position.set(x, 0.1, z); g.rotation.y = rotY; scene.add(g);
     return {{ mesh: g, velX: velX }};
   }}
   const carros = [
-    criarCarro(12.0, 7.2, Math.PI / 2, 0xcbd5e1, 13.5),
-    criarCarro(56.0, 10.6, -Math.PI / 2, 0xdc2626, -15.5)
+    criarCarro(12.0, 7.2, Math.PI / 2, 0xcbd5e1, 13.0),
+    criarCarro(56.0, 10.6, -Math.PI / 2, 0xdc2626, -15.0)
   ];
 
   // ==========================================================================
-  // PERSONAGEM ARTICULADO ESTILO ROBLOX + RAGDOLL DE MORTE
+  // BONECO ARTICULADO + RAGDOLL DE MORTE
   // ==========================================================================
   const player = new THREE.Group();
   const matPele = new THREE.MeshStandardMaterial({{ color: 0xfcd34d }});
-  const matTroncoP = new THREE.MeshStandardMaterial({{ color: 0x2563eb }});
-  const matCalca = new THREE.MeshStandardMaterial({{ color: 0x1e293b }});
-
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.85, 0.4), matTroncoP);
-  torso.position.set(0, 1.15, 0); torso.castShadow = true; player.add(torso);
-
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.85, 0.4), new THREE.MeshStandardMaterial({{ color: 0x2563eb }}));
+  torso.position.set(0, 1.15, 0); player.add(torso);
   const cabeca = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.48, 0.48), matPele);
-  cabeca.position.set(0, 1.85, 0); cabeca.castShadow = true; player.add(cabeca);
-
-  const pernaEsq = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.75, 0.34), matCalca);
-  pernaEsq.position.set(-0.2, 0.38, 0); pernaEsq.castShadow = true; player.add(pernaEsq);
-
-  const pernaDir = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.75, 0.34), matCalca);
-  pernaDir.position.set(0.2, 0.38, 0); pernaDir.castShadow = true; player.add(pernaDir);
-
+  cabeca.position.set(0, 1.85, 0); player.add(cabeca);
+  const pernaEsq = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.75, 0.34), new THREE.MeshStandardMaterial({{ color: 0x1e293b }}));
+  pernaEsq.position.set(-0.2, 0.38, 0); player.add(pernaEsq);
+  const pernaDir = pernaEsq.clone(); pernaDir.position.x = 0.2; player.add(pernaDir);
   const bracoEsq = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.78, 0.28), matPele);
-  bracoEsq.position.set(-0.54, 1.15, 0); bracoEsq.castShadow = true; player.add(bracoEsq);
-
-  const bracoDir = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.78, 0.28), matPele);
-  bracoDir.position.set(0.54, 1.15, 0); bracoDir.castShadow = true; player.add(bracoDir);
+  bracoEsq.position.set(-0.54, 1.15, 0); player.add(bracoEsq);
+  const bracoDir = bracoEsq.clone(); bracoDir.position.x = 0.54; player.add(bracoDir);
 
   const partesBoneco = [
     {{ mesh: torso, posOrig: [0, 1.15, 0], vel: new THREE.Vector3(), rotVel: new THREE.Vector3() }},
@@ -789,40 +746,56 @@ def renderizar_walkthrough_webgl(modo_noite=False):
     {{ mesh: bracoEsq, posOrig: [-0.54, 1.15, 0], vel: new THREE.Vector3(), rotVel: new THREE.Vector3() }},
     {{ mesh: bracoDir, posOrig: [0.54, 1.15, 0], vel: new THREE.Vector3(), rotVel: new THREE.Vector3() }},
   ];
-
   player.position.set(14.0, 0.2, 14.0);
   scene.add(player);
 
+  // Estado do Jogo e Estações
   let isDead = false;
   let deathCount = 0;
-  const wastedOverlay = document.getElementById('wasted-overlay');
-  const deathReasonEl = document.getElementById('wasted-sub');
+  let velY = 0;
+  let walkCycle = 0;
+  let tempoNaFonte = 0;
+  let subiuArvore = false;
+  let subiuPoste = false;
+  let atravessouRua = false;
+  let estavaNoTelhado = false;
+
+  const checks = {{ foto: false, fonte: false, poste: false, arvore: false, rua: false, telhado: false }};
+  function marcarCheck(chave, elId) {{
+    if (checks[chave]) return;
+    checks[chave] = true;
+    const el = document.getElementById(elId);
+    el.textContent = "CHECK ✓";
+    el.className = "st-done";
+    const total = Object.values(checks).filter(Boolean).length;
+    document.querySelector('.st-title').textContent = `ESTAÇÕES PARKOUR (${{total}}/6)`;
+    if (total === 6) {{
+      document.getElementById('victory-banner').style.display = 'block';
+    }}
+  }}
 
   function triggerDeath(motivo, impactoVel) {{
     if (isDead) return;
     isDead = true;
     deathCount++;
-    deathReasonEl.textContent = motivo;
-    wastedOverlay.style.display = 'flex';
+    document.getElementById('wasted-sub').textContent = motivo;
+    document.getElementById('wasted-overlay').style.display = 'flex';
+    document.getElementById('toxic-bar-wrap').style.display = 'none';
 
-    // Explode o boneco estilo Roblox OOF / Dumb Ways to Die
     partesBoneco.forEach((p) => {{
-      p.vel.set(
-        (Math.random() - 0.5) * 9.0 + impactoVel.x,
-        4.5 + Math.random() * 6.5,
-        (Math.random() - 0.5) * 9.0 + impactoVel.z
-      );
-      p.rotVel.set(
-        (Math.random() - 0.5) * 12,
-        (Math.random() - 0.5) * 12,
-        (Math.random() - 0.5) * 12
-      );
+      p.vel.set((Math.random() - 0.5) * 9 + impactoVel.x, 4.5 + Math.random() * 6, (Math.random() - 0.5) * 9 + impactoVel.z);
+      p.rotVel.set((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12);
     }});
   }}
 
   window.resetPlayer = () => {{
     isDead = false;
-    wastedOverlay.style.display = 'none';
+    tempoNaFonte = 0;
+    subiuArvore = false;
+    subiuPoste = false;
+    estavaNoTelhado = false;
+    document.getElementById('wasted-overlay').style.display = 'none';
+    document.getElementById('toxic-bar-wrap').style.display = 'none';
     player.position.set(14.0, 0.2, 14.0);
     velY = 0;
     partesBoneco.forEach((p) => {{
@@ -835,82 +808,62 @@ def renderizar_walkthrough_webgl(modo_noite=False):
   window.addEventListener('keydown', (e) => {{
     keys[e.code] = true;
     if (e.code === 'KeyR') window.resetPlayer();
+    if (e.code === 'KeyF' && !isDead) {{
+      const dFoto = Math.hypot(player.position.x - 11.5, player.position.z - 18.0);
+      if (dFoto < 2.2) {{
+        const fl = document.getElementById('flash-foto');
+        fl.style.display = 'block';
+        setTimeout(() => {{ fl.style.display = 'none'; }}, 140);
+        marcarCheck('foto', 'st-foto');
+      }}
+    }}
   }});
   window.addEventListener('keyup', (e) => {{ keys[e.code] = false; }});
 
-  let camYaw = 0.65;
-  let camPitch = 0.32;
-  let camDist = 7.5;
-  let camMode = 'third';
-  let isDragging = false;
-  let prevMouse = {{ x: 0, y: 0 }};
-
-  renderer.domElement.addEventListener('mousedown', (e) => {{
-    isDragging = true;
-    prevMouse = {{ x: e.clientX, y: e.clientY }};
-  }});
+  let camYaw = 0.65, camPitch = 0.32, camDist = 7.5, camMode = 'third', isDragging = false, prevMouse = {{ x: 0, y: 0 }};
+  renderer.domElement.addEventListener('mousedown', (e) => {{ isDragging = true; prevMouse = {{ x: e.clientX, y: e.clientY }}; }});
   window.addEventListener('mouseup', () => {{ isDragging = false; }});
   window.addEventListener('mousemove', (e) => {{
     if (!isDragging || camMode === 'iso') return;
-    const dx = e.clientX - prevMouse.x;
-    const dy = e.clientY - prevMouse.y;
-    camYaw -= dx * 0.007;
-    camPitch = Math.max(0.08, Math.min(1.35, camPitch + dy * 0.006));
+    camYaw -= (e.clientX - prevMouse.x) * 0.007;
+    camPitch = Math.max(0.08, Math.min(1.35, camPitch + (e.clientY - prevMouse.y) * 0.006));
     prevMouse = {{ x: e.clientX, y: e.clientY }};
   }});
-  renderer.domElement.addEventListener('wheel', (e) => {{
-    camDist = Math.max(3.0, Math.min(28.0, camDist + e.deltaY * 0.008));
-  }});
-
+  renderer.domElement.addEventListener('wheel', (e) => {{ camDist = Math.max(3.0, Math.min(28.0, camDist + e.deltaY * 0.008)); }});
   window.setCameraMode = (mode) => {{ camMode = mode; }};
 
-  function verificarColisaoSolida(nx, nz) {{
-    // 1. Bloco 734
-    const inBox = (nx > 14.5 && nx < 59.5 && nz > 19.5 && nz < 53.5);
+  function dentroPlantaBloco(nx, nz) {{
+    const inBox = (nx > 14.6 && nx < 59.4 && nz > 19.6 && nz < 53.4);
     const distArc = Math.hypot(nx - 37.0, nz - 42.0);
-    if (inBox && (!(nx < 37.0 && nz < 42.0) || distArc < 22.4)) return true;
-
-    // 2. Caixas (Fonte e Abrigo)
-    for (const c of obstaculosCaixas) {{
-      if (nx > c.minX && nx < c.maxX && nz > c.minZ && nz < c.maxZ) return true;
-    }}
-
-    // 3. Cilindros (Árvores e Postes)
-    for (const cil of obstaculosCilindricos) {{
-      if (Math.hypot(nx - cil.x, nz - cil.z) < (cil.r + 0.35)) return true;
-    }}
-    return false;
+    return inBox && (!(nx < 37.0 && nz < 42.0) || distArc < 22.3);
   }}
 
-  let velY = 0;
-  let walkCycle = 0;
   const clock = new THREE.Clock();
+  const promptBox = document.getElementById('prompt-box');
+  const toxicWrap = document.getElementById('toxic-bar-wrap');
+  const toxicBar = document.getElementById('toxic-bar');
   const coordsEl = document.getElementById('coords');
 
   function animate() {{
     requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.05);
 
-    laminaAgua.position.y = 0.50 + Math.sin(clock.elapsedTime * 3.0) * 0.015;
+    // Anima faíscas dos fios descascados nos postes
+    faiscas.forEach((f, idx) => {{
+      f.visible = Math.sin(clock.elapsedTime * 22 + idx) > 0.2;
+    }});
 
-    // Atualiza carros na pista
+    // Carros em movimento
     carros.forEach((c) => {{
       c.mesh.position.x += c.velX * dt;
       if (c.velX > 0 && c.mesh.position.x > 66.0) c.mesh.position.x = 4.0;
       if (c.velX < 0 && c.mesh.position.x < 4.0) c.mesh.position.x = 66.0;
-
-      // Checa atropelamento
-      if (!isDead) {{
-        const dxC = Math.abs(player.position.x - c.mesh.position.x);
-        const dzC = Math.abs(player.position.z - c.mesh.position.z);
-        if (dxC < 2.25 && dzC < 1.15 && player.position.y < 1.5) {{
-          triggerDeath("Atropelado na Via do CT! Olhe para os dois lados.", new THREE.Vector3(c.velX * 0.7, 3.0, (Math.random()-0.5)*5));
-        }}
+      if (!isDead && Math.abs(player.position.x - c.mesh.position.x) < 2.2 && Math.abs(player.position.z - c.mesh.position.z) < 1.15 && player.position.y < 1.5) {{
+        triggerDeath("Atropelado na Via do CT! Olhe antes de atravessar.", new THREE.Vector3(c.velX * 0.7, 3.0, 0));
       }}
     }});
 
     if (isDead) {{
-      // Física das peças desmontadas
       partesBoneco.forEach((p) => {{
         p.vel.y -= 16.0 * dt;
         p.mesh.position.addScaledVector(p.vel, dt);
@@ -918,67 +871,172 @@ def renderizar_walkthrough_webgl(modo_noite=False):
         p.mesh.rotation.y += p.rotVel.y * dt;
         p.mesh.rotation.z += p.rotVel.z * dt;
         if (p.mesh.position.y < 0.2) {{
-          p.mesh.position.y = 0.2;
-          p.vel.y *= -0.45;
-          p.vel.x *= 0.85;
-          p.vel.z *= 0.85;
+          p.mesh.position.y = 0.2; p.vel.y *= -0.45; p.vel.x *= 0.85; p.vel.z *= 0.85;
         }}
       }});
     }} else {{
-      // Checa toque na Escultura Cinética (Obra de Arte)
-      const distEsc = Math.hypot(player.position.x - 15.0, player.position.z - 22.0);
-      if (distEsc < 2.15 && player.position.y < 3.8) {{
-        triggerDeath("Eletrocutado / Esmagado ao tocar a Escultura Cinética!", new THREE.Vector3((player.position.x - 15.0)*4, 3.5, (player.position.z - 22.0)*4));
+      let promptTexto = "";
+
+      // 1. Checa Escultura Cinética (foto ou morte)
+      if (Math.hypot(player.position.x - 11.5, player.position.z - 18.0) < 2.2) {{
+        promptTexto = "Aperte [F] para tirar foto da Escultura Cinética!";
+      }}
+      if (Math.hypot(player.position.x - 15.0, player.position.z - 22.0) < 2.1 && player.position.y < 3.8) {{
+        triggerDeath("Eletrocutado / Esmagado ao encostar na Escultura Cinética!", new THREE.Vector3(0, 4, -4));
       }}
 
-      let moveForward = 0;
-      let moveRight = 0;
+      // 2. Checa Fonte Contaminada (entra -> sai rápido = check; demora = morre)
+      const naAgua = (player.position.x > 19.6 && player.position.x < 34.4 && player.position.z > 16.9 && player.position.z < 22.7 && player.position.y < 0.9);
+      if (naAgua) {{
+        tempoNaFonte += dt;
+        toxicWrap.style.display = 'block';
+        toxicBar.style.width = Math.min(100, (tempoNaFonte / 3.5) * 100) + '%';
+        if (tempoNaFonte >= 3.5) {{
+          triggerDeath("Intoxicado pela água parada contaminada da fonte!", new THREE.Vector3(0, 3, 0));
+        }}
+      }} else {{
+        if (tempoNaFonte > 0.25 && tempoNaFonte < 3.5) {{
+          marcarCheck('fonte', 'st-fonte');
+        }}
+        tempoNaFonte = 0;
+        toxicWrap.style.display = 'none';
+      }}
+
+      // 3. Checa Travessia da Rua (Estação 5)
+      if (Math.hypot(player.position.x - 27.0, player.position.z - 3.2) < 2.0) {{
+        atravessouRua = true;
+        promptTexto = "Objetivo alcançado! Agora volte em segurança para a calçada!";
+      }}
+      if (atravessouRua && player.position.z >= 16.5) {{
+        marcarCheck('rua', 'st-rua');
+      }}
+
+      // 4. Escalada em Árvore, Poste e Escada do Telhado (Tecla E)
+      let escalando = false;
+
+      // Escada do Telhado (X=59.35, Z=24.0)
+      if (Math.hypot(player.position.x - 59.35, player.position.z - 24.0) < 1.35) {{
+        promptTexto = "Segure [E] para subir a escada até o telhado!";
+        if (keys['KeyE']) {{
+          escalando = true;
+          velY = 0;
+          player.position.y += 4.2 * dt;
+          if (player.position.y >= 6.85) {{
+            player.position.y = 6.85;
+            player.position.x = 58.2; // Coloca em cima do telhado
+          }}
+        }}
+      }}
+
+      // Postes (subir = check ao descer; tocar na luz/fio no topo = eletrocutado!)
+      postes.forEach(([px, pz]) => {{
+        if (Math.hypot(player.position.x - px, player.position.z - pz) < 1.1) {{
+          promptTexto = "Segure [E] para escalar o poste (Cuidado com o fio descascado no topo!)";
+          if (keys['KeyE']) {{
+            escalando = true;
+            velY = 0;
+            player.position.y += 3.6 * dt;
+            if (player.position.y > 2.8) subiuPoste = true;
+            if (player.position.y >= 5.5) {{
+              triggerDeath("Eletrocutado no fio descascado do poste de iluminação!", new THREE.Vector3((Math.random()-0.5)*6, 2, -4));
+            }}
+          }}
+        }}
+      }});
+      if (subiuPoste && !escalando && player.position.y <= 0.35) {{
+        marcarCheck('poste', 'st-poste');
+        subiuPoste = false;
+      }}
+
+      // Árvores (subir até a copa e descer = check; subir sem parar = galho quebra e despenca!)
+      arvores.forEach(([ax, az, esc]) => {{
+        if (Math.hypot(player.position.x - ax, player.position.z - az) < 1.3) {{
+          promptTexto = "Segure [E] para escalar a árvore (Não suba além do topo!)";
+          if (keys['KeyE']) {{
+            escalando = true;
+            velY = 0;
+            player.position.y += 3.4 * dt;
+            if (player.position.y > 2.6) subiuArvore = true;
+            if (player.position.y >= 4.7 * esc) {{
+              triggerDeath("Subiu demais! O galho quebrou e você despencou lá de cima!", new THREE.Vector3(2, -6, -2));
+            }}
+          }}
+        }}
+      }});
+      if (subiuArvore && !escalando && player.position.y <= 0.35) {{
+        marcarCheck('arvore', 'st-arvore');
+        subiuArvore = false;
+      }}
+
+      if (promptTexto) {{
+        promptBox.textContent = promptTexto;
+        promptBox.style.display = 'block';
+      }} else {{
+        promptBox.style.display = 'none';
+      }}
+
+      // Movimento Horizontal WASD
+      let moveForward = 0, moveRight = 0;
       if (keys['KeyW'] || keys['ArrowUp']) moveForward += 1;
       if (keys['KeyS'] || keys['ArrowDown']) moveForward -= 1;
       if (keys['KeyD'] || keys['ArrowRight']) moveRight += 1;
       if (keys['KeyA'] || keys['ArrowLeft']) moveRight -= 1;
 
       const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? 10.5 : 5.5;
-      const isMoving = (moveForward !== 0 || moveRight !== 0);
-
-      if (isMoving) {{
+      if (moveForward !== 0 || moveRight !== 0) {{
         const forwardVec = new THREE.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
         const rightVec = new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw));
-        const dir = new THREE.Vector3()
-          .addScaledVector(forwardVec, moveForward)
-          .addScaledVector(rightVec, moveRight)
-          .normalize();
+        const dir = new THREE.Vector3().addScaledVector(forwardVec, moveForward).addScaledVector(rightVec, moveRight).normalize();
 
         const nextX = THREE.MathUtils.clamp(player.position.x + dir.x * speed * dt, 3.0, 67.0);
-        const nextZ = THREE.MathUtils.clamp(player.position.z + dir.z * speed * dt, 3.0, 58.0);
+        const nextZ = THREE.MathUtils.clamp(player.position.z + dir.z * speed * dt, 2.5, 58.0);
 
-        if (!verificarColisaoSolida(nextX, player.position.z)) player.position.x = nextX;
-        if (!verificarColisaoSolida(player.position.x, nextZ)) player.position.z = nextZ;
+        // Só bloqueia parede do prédio se o boneco estiver abaixo da laje do telhado (y < 6.5)
+        const bateuParedeX = (player.position.y < 6.4) && dentroPlantaBloco(nextX, player.position.z);
+        const bateuParedeZ = (player.position.y < 6.4) && dentroPlantaBloco(player.position.x, nextZ);
+
+        if (!bateuParedeX) player.position.x = nextX;
+        if (!bateuParedeZ) player.position.z = nextZ;
 
         player.rotation.y = Math.atan2(dir.x, dir.z);
-
         walkCycle += dt * speed * 2.2;
         const swing = Math.sin(walkCycle) * 0.55;
-        pernaEsq.rotation.x = swing;
-        pernaDir.rotation.x = -swing;
-        bracoEsq.rotation.x = -swing * 0.8;
-        bracoDir.rotation.x = swing * 0.8;
+        pernaEsq.rotation.x = swing; pernaDir.rotation.x = -swing;
+        bracoEsq.rotation.x = -swing * 0.8; bracoDir.rotation.x = swing * 0.8;
+      }} else if (escalando) {{
+        walkCycle += dt * 10.0;
+        const cl = Math.sin(walkCycle) * 0.7;
+        bracoEsq.rotation.x = Math.PI + cl; bracoDir.rotation.x = Math.PI - cl;
+        pernaEsq.rotation.x = -cl * 0.5; pernaDir.rotation.x = cl * 0.5;
       }} else {{
-        pernaEsq.rotation.x *= 0.8;
-        pernaDir.rotation.x *= 0.8;
-        bracoEsq.rotation.x *= 0.8;
-        bracoDir.rotation.x *= 0.8;
+        pernaEsq.rotation.x *= 0.8; pernaDir.rotation.x *= 0.8;
+        bracoEsq.rotation.x *= 0.8; bracoDir.rotation.x *= 0.8;
       }}
 
-      const groundY = player.position.z >= 16.0 ? 0.2 : 0.1;
-      if (keys['Space'] && Math.abs(player.position.y - groundY) < 0.05) {{
-        velY = 6.8;
+      // Altura do piso (Telhado vs Calçada vs Via)
+      const noTelhado = dentroPlantaBloco(player.position.x, player.position.z) && (player.position.y >= 6.4);
+      if (noTelhado) {{
+        estavaNoTelhado = true;
+        marcarCheck('telhado', 'st-telhado');
       }}
-      velY -= 18.0 * dt;
-      player.position.y += velY * dt;
-      if (player.position.y <= groundY) {{
-        player.position.y = groundY;
-        velY = 0;
+
+      const groundY = noTelhado ? 6.8 : (player.position.z >= 16.0 ? 0.2 : 0.1);
+
+      if (!escalando) {{
+        if (keys['Space'] && Math.abs(player.position.y - groundY) < 0.08) {{
+          velY = 6.8;
+        }}
+        velY -= 18.0 * dt;
+        player.position.y += velY * dt;
+        if (player.position.y <= groundY) {{
+          // Se estava no telhado (6.8m) e caiu direto no chão (0.2m), morre de queda!
+          if (estavaNoTelhado && groundY < 1.0 && velY < -8.5) {{
+            triggerDeath("Caiu do telhado do Bloco 734 sem usar a escada!", new THREE.Vector3(0, 1, 0));
+          }}
+          player.position.y = groundY;
+          velY = 0;
+          if (groundY < 1.0) estavaNoTelhado = false;
+        }}
       }}
     }}
 
@@ -994,7 +1052,7 @@ def renderizar_walkthrough_webgl(modo_noite=False):
       camera.lookAt(targetLook);
     }}
 
-    coordsEl.textContent = `Mortes: ${{deathCount}} | X=${{player.position.x.toFixed(1)}} | Z=${{player.position.z.toFixed(1)}}`;
+    coordsEl.textContent = `Mortes: ${{deathCount}} | X=${{player.position.x.toFixed(1)}} | Y=${{player.position.y.toFixed(1)}} | Z=${{player.position.z.toFixed(1)}}`;
     renderer.render(scene, camera);
   }}
 
@@ -1003,13 +1061,12 @@ def renderizar_walkthrough_webgl(modo_noite=False):
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   }});
-
   animate();
 </script>
 </body>
 </html>
 """
-  components.html(html_code, height=620)
+  components.html(html_code, height=630)
 
 
 # ==============================================================================
@@ -1021,7 +1078,7 @@ modo_noite = st.sidebar.toggle(
 )
 
 st.sidebar.divider()
-st.sidebar.subheader("Câmera e Projeções (Sincroniza 3D e Render)")
+st.sidebar.subheader("Câmera e Projeções (Inspeção 3D e Render)")
 estilo_preview = st.sidebar.radio(
     "Estilo da Inspeção 3D",
     options=["materiais", "shaded", "wireframe"],
@@ -1047,8 +1104,15 @@ preset_escolhido = st.sidebar.selectbox(
     options=list(preset_nomes.keys()),
     format_func=lambda k: preset_nomes[k],
 )
-renderer_temp = carregar_motor(280)
+renderer_temp = carregar_motor(420)
 cfg_atual = renderer_temp.presets[preset_escolhido].copy()
+
+with st.sidebar.expander("Órbita Travada (Azimute & Elevação 0°–90°)"):
+  usar_orbita = st.checkbox(
+      "Controlar Inspeção 3D por Azimute / Elevação", value=False
+  )
+  az_deg = st.slider("Azimute (0° a 360°)", 0, 360, 225)
+  el_deg = st.slider("Elevação Vertical (2° a 88°)", 2, 88, 28)
 
 with st.sidebar.expander("Câmera Manual (Eye / At)"):
   usar_manual = st.checkbox("Ativar coordenadas manuais", value=False)
@@ -1068,41 +1132,45 @@ with st.sidebar.expander("Câmera Manual (Eye / At)"):
     cfg_atual["titulo"] = f"Câmera Manual Eye=({ex:.1f}, {ey:.1f}, {ez:.1f})"
 
 st.sidebar.divider()
-st.sidebar.subheader("Qualidade e Otimização do Ray Casting")
+st.sidebar.subheader("Qualidade do Ray Casting")
 resolucao = st.sidebar.select_slider(
-    "Resolução do Ray Casting", options=[200, 280, 360, 480], value=360
+    "Resolução Base", options=[240, 360, 480, 640], value=480
 )
-suavizar_aa_rc = st.sidebar.toggle("Suavização Anti-Aliasing (Remove Pixelado)", value=True)
+ssaa_rc = st.sidebar.toggle(
+    "Supersampling 4x (Nitidez Máxima / Sem Pixelado)", value=True
+)
 incluir_objs_rc = st.sidebar.toggle(
     "Incluir Malhas .OBJ no Render (Mais pesado)", value=False
 )
 ativar_sombras_rc = st.sidebar.toggle("Sombras Projetadas", value=True)
-ativar_reflexos_rc = st.sidebar.toggle("Reflexos (Vidro / Água / Aço)", value=False)
+ativar_reflexos_rc = st.sidebar.toggle("Reflexos (Vidro / Água / Aço)", value=True)
 ativar_caustics_rc = st.sidebar.toggle("Cáusticas da Fonte", value=True)
 
 renderer = carregar_motor(resolucao)
 
 aba_walk, aba_3d, aba_rc = st.tabs([
-    "1. Walkthrough 3D (Jogo / WASD)",
-    "2. Inspeção 3D (Picking & Câmeras)",
+    "1. Walkthrough & Parkour (Dumb Ways to Die)",
+    "2. Inspeção 3D (Picking & Câmera)",
     "3. Render Final (Ray Casting)",
 ])
 
 with aba_walk:
   st.caption(
-      "Clique na cena para ativar o teclado (W, A, S, D, Shift, Espaço). Encostar nos carros em movimento ou na Escultura Cinética ativa o modo Dumb Ways to Die!"
+      "Complete as 6 estações de Parkour sem morrer! Segure [E] perto de árvores, postes ou da escada lateral para subir; aperte [F] na marca azul para fotografar a escultura."
   )
   renderizar_walkthrough_webgl(modo_noite=modo_noite)
 
 with aba_3d:
   st.caption(
-      "Clique sobre qualquer objeto na cena 3D abaixo para inspecionar seu nome e coordenadas (Picking). Os templates de câmera da barra lateral atualizam esta visão."
+      "Proporção real 1:1:1 com câmera travada acima do solo (sem capotar para ver embaixo). Clique em qualquer objeto para Picking."
   )
   fig_3d = construir_figura_3d_interativa(
       renderer,
       estilo=estilo_preview,
       modo_noite=modo_noite,
       cfg_cam=cfg_atual,
+      azimute_deg=az_deg if usar_orbita else None,
+      elevacao_deg=el_deg if usar_orbita else None,
   )
   evento_pick = st.plotly_chart(
       fig_3d,
@@ -1121,14 +1189,14 @@ with aba_3d:
     )
     px_c, pz_c, py_c = pt.get("x", 0.0), pt.get("y", 0.0), pt.get("z", 0.0)
     st.success(
-        f"**Objeto Selecionado (Picking):** {nome_obj}  |  **Coordenadas Mundo:** X = `{px_c:.2f}m`, Y (Altura) = `{py_c:.2f}m`, Z = `{pz_c:.2f}m`"
+        f"**Objeto Selecionado (Picking):** {nome_obj}  |  **Coordenadas:** X = `{px_c:.2f}m`, Altura Y = `{py_c:.2f}m`, Z = `{pz_c:.2f}m`"
     )
 
 with aba_rc:
   if st.button(
       "RENDERIZAR RAY CASTING AGORA", type="primary", width="stretch"
   ):
-    with st.spinner("Renderizando cena..."):
+    with st.spinner("Renderizando imagem com Supersampling 4x..."):
       img, titulo_render = renderer.renderizar_config(
           cfg_atual,
           modo_noite=modo_noite,
@@ -1136,7 +1204,7 @@ with aba_rc:
           ativar_reflexos=ativar_reflexos_rc,
           ativar_sombras=ativar_sombras_rc,
           incluir_objs=incluir_objs_rc,
-          suavizar_aa=suavizar_aa_rc,
+          ssaa=ssaa_rc,
       )
       st.session_state["img_render"] = img
       st.session_state["tit_render"] = titulo_render
@@ -1146,5 +1214,5 @@ with aba_rc:
     st.image(st.session_state["img_render"], width="stretch")
   else:
     st.info(
-        "Selecione o template de câmera e os efeitos na barra lateral e clique no botão acima para renderizar."
+        "Selecione o template de câmera e clique no botão acima para gerar a imagem final."
     )
