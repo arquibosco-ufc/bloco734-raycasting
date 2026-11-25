@@ -73,6 +73,9 @@ st.markdown(
         padding-top: 6px;
         border-top: 1px solid rgba(148, 163, 184, 0.25);
     }
+    @media (pointer: coarse), (max-width: 900px) {
+      #xbox-sticks { display: block; }
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -150,7 +153,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>Bloco 734 — Campus CT 3D Interativo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
@@ -162,6 +165,10 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     position: relative; width: 100%; height: 720px;
     background: #0b1120; border-radius: 12px; overflow: hidden;
     border: 1px solid #1e293b;
+  }
+  @media (max-width: 900px) {
+    #game-wrapper { height: 560px; }
+  }
   }
   #game-wrapper.pseudo-fullscreen {
     position: fixed !important; inset: 0 !important;
@@ -436,30 +443,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     border-radius: 8px; padding: 10px; text-align: center;
   }
   .inv-slot.collected { border-color: #22c55e; background: rgba(20, 83, 45, 0.28); }
-
-  /* CONTROLES TOUCH ESTILO ROBLOX PARA MOBILE / TABLET */
-  #touch-controls {
-    position: absolute; bottom: 66px; left: 14px;
-    display: none; flex-direction: column; align-items: center; gap: 6px;
-    z-index: 25; pointer-events: auto;
-  }
-  .touch-row { display: flex; gap: 6px; justify-content: center; }
-  .touch-btn {
-    width: 48px; height: 48px; border-radius: 12px;
-    background: rgba(15, 23, 42, 0.78); backdrop-filter: blur(6px);
-    border: 1.5px solid rgba(56, 189, 248, 0.65);
-    color: #f8fafc; font-size: 18px; font-weight: 800;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; touch-action: none;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.45);
-  }
-  .touch-btn:active, .touch-btn.pressed {
-    background: rgba(37, 99, 235, 0.85);
-    transform: scale(0.94);
-  }
-  @media (pointer: coarse), (max-width: 900px) {
-    #touch-controls { display: flex; }
-  }
 </style>
 </head>
 <body>
@@ -539,15 +522,15 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     <button class="action-btn" id="btn-iso" title="Projeção Isométrica">🧊 Isométrica</button>
   </div>
 
-  <!-- BOTÕES DE AÇÃO INFERIORES DIREITOS -->
-  <div id="touch-controls" aria-label="Controles de movimento mobile">
-    <div class="touch-row">
-      <button class="touch-btn" data-key="w" title="Frente">▲</button>
+  
+  </div>
+
+  <div id="xbox-sticks" style="position:absolute;inset:0;pointer-events:none;z-index:25;display:none;touch-action:none;">
+    <div id="stick-walk" style="position:absolute;left:20px;bottom:68px;width:116px;height:116px;border-radius:50%;background:rgba(15,23,42,0.55);border:2px solid rgba(56,189,248,0.65);pointer-events:auto;touch-action:none;">
+      <div class="knob" style="position:relative;left:35px;top:35px;width:42px;height:42px;border-radius:50%;background:rgba(56,189,248,0.9);box-shadow:0 4px 12px rgba(0,0,0,0.45);"></div>
     </div>
-    <div class="touch-row">
-      <button class="touch-btn" data-key="a" title="Esquerda">◀</button>
-      <button class="touch-btn" data-key="s" title="Trás">▼</button>
-      <button class="touch-btn" data-key="d" title="Direita">▶</button>
+    <div id="stick-look" style="position:absolute;right:20px;bottom:68px;width:116px;height:116px;border-radius:50%;background:rgba(15,23,42,0.55);border:2px solid rgba(167,139,250,0.65);pointer-events:auto;touch-action:none;">
+      <div class="knob" style="position:relative;left:35px;top:35px;width:42px;height:42px;border-radius:50%;background:rgba(167,139,250,0.9);box-shadow:0 4px 12px rgba(0,0,0,0.45);"></div>
     </div>
   </div>
 
@@ -1574,7 +1557,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   function responderCreto(escolha) {
     const item = quizDeck[quizIdx];
     const fb = document.getElementById('creto-feedback');
-    document.querySelectorAll('.quiz-opt').forEach(b => (b.disabled = true));
+    
 
     if (escolha === item.ans) {
       SoundEngine.playCollect();
@@ -2267,26 +2250,48 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       iniciarCutsceneDanca("💃 Comemorando no Bloco 734!");
     }
   });
+  const analog = { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
+
+  function bindXboxStick(el, onStick) {
+    const knob = el.querySelector('.knob');
+    const maxR = 35;
+    let pid = null;
+
+    function setFromPoint(cx, cy) {
+      const r = el.getBoundingClientRect();
+      let dx = cx - (r.left + r.width / 2);
+      let dy = cy - (r.top + r.height / 2);
+      const dist = Math.hypot(dx, dy);
+      if (dist > maxR) { dx = (dx / dist) * maxR; dy = (dy / dist) * maxR; }
+      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+      onStick(dx / maxR, -dy / maxR);
+    }
+
+    function clearStick() {
+      pid = null;
+      knob.style.transform = 'translate(0px, 0px)';
+      onStick(0, 0);
+    }
+
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      SoundEngine.init();
+      pid = e.pointerId;
+      el.setPointerCapture(pid);
+      setFromPoint(e.clientX, e.clientY);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (e.pointerId === pid) { e.preventDefault(); setFromPoint(e.clientX, e.clientY); }
+    });
+    el.addEventListener('pointerup', (e) => { if (e.pointerId === pid) clearStick(); });
+    el.addEventListener('pointercancel', (e) => { if (e.pointerId === pid) clearStick(); });
+  }
+
+  bindXboxStick(document.getElementById('stick-walk'), (x, y) => { analog.moveX = x; analog.moveY = y; });
+  bindXboxStick(document.getElementById('stick-look'), (x, y) => { analog.lookX = x; analog.lookY = y; });
   window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
-  document.querySelectorAll('.touch-btn[data-key]').forEach((btn) => {
-    const tKey = btn.getAttribute('data-key');
-    const pressFn = (ev) => {
-      ev.preventDefault();
-      SoundEngine.init();
-      keys[tKey] = true;
-      btn.classList.add('pressed');
-    };
-    const releaseFn = (ev) => {
-      ev.preventDefault();
-      keys[tKey] = false;
-      btn.classList.remove('pressed');
-    };
-    btn.addEventListener('pointerdown', pressFn);
-    btn.addEventListener('pointerup', releaseFn);
-    btn.addEventListener('pointerleave', releaseFn);
-    btn.addEventListener('pointercancel', releaseFn);
-  });
+  
 
   window.addEventListener('mousemove', (e) => {
     if (!isDragging || isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal) return;
@@ -2726,6 +2731,13 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       if (keys['s'] || keys['arrowdown']) moveF -= 1;
       if (keys['d'] || keys['arrowright']) moveR += 1;
       if (keys['a'] || keys['arrowleft']) moveR -= 1;
+
+      if (Math.abs(analog.lookX) > 0.04 || Math.abs(analog.lookY) > 0.04) {
+        pState.camYaw -= analog.lookX * 2.5 * dt;
+        pState.camPitch = Math.max(0.05, Math.min(1.25, pState.camPitch - analog.lookY * 1.8 * dt));
+      }
+      if (Math.abs(analog.moveY) > 0.06) moveF += analog.moveY;
+      if (Math.abs(analog.moveX) > 0.06) moveR += analog.moveX;
 
       const fwd = new THREE.Vector3(-Math.sin(pState.camYaw), 0, -Math.cos(pState.camYaw));
       const right = new THREE.Vector3(Math.cos(pState.camYaw), 0, -Math.sin(pState.camYaw));
