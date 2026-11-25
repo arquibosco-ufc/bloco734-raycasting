@@ -520,7 +520,7 @@ def construir_figura_3d_interativa(
 
 
 def renderizar_inspecao_webgl_roblox(modo_noite=False):
-  """Visualizador estilo Roblox (WebGL sem Raycast) exclusivo para Inspeção 3D e Picking interativo."""
+  """Visualizador estilo Roblox (WebGL sem Raycast) com boneco e Picking completo em popup."""
   noite_js = "true" if modo_noite else "false"
   html_code = f"""
 <!DOCTYPE html>
@@ -537,28 +537,31 @@ def renderizar_inspecao_webgl_roblox(modo_noite=False):
   }}
   #pick-popup {{
     display: none; position: absolute; top: 12px; right: 12px; z-index: 20;
-    background: rgba(15, 23, 42, 0.94); color: #F8FAFC;
-    padding: 14px 18px; border-radius: 12px; border: 2px solid #38BDF8;
-    width: 310px; box-shadow: 0 10px 25px rgba(0,0,0,0.65); font-size: 13px; line-height: 1.5;
+    background: rgba(15, 23, 42, 0.95); color: #F8FAFC;
+    padding: 15px 18px; border-radius: 12px; border: 2px solid #38BDF8;
+    width: 325px; box-shadow: 0 10px 25px rgba(0,0,0,0.65); font-size: 13px; line-height: 1.5;
   }}
   #pick-popup h4 {{ margin: 0 0 6px 0; color: #38BDF8; font-size: 15px; }}
   .tag-info {{ display: inline-block; background: #1E3A8A; color: #93C5FD; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; margin-bottom: 6px; }}
+  #btn-close-pk {{ float: right; background: transparent; border: none; color: #94A3B8; font-weight: 800; cursor: pointer; font-size: 14px; }}
 </style>
 </head>
 <body>
 <div id="hud-insp">
-  <div style="font-weight:800; color:#38BDF8; font-size:14px;">Inspeção 3D — Modo WebGL (Sem Raycast)</div>
-  <div>• <b>Clique Esquerdo em qualquer objeto</b>: Picking completo</div>
+  <div style="font-weight:800; color:#38BDF8; font-size:14px;">Inspeção 3D — Modo WebGL / Roblox (Sem Raycast)</div>
+  <div>• <b>Clique em qualquer objeto ou boneco</b>: Popup completo de Picking</div>
   <div>• <b>Arrastar Mouse</b>: Orbitar (0°–360° Azimute | 2°–88° Elevação)</div>
   <div>• <b>Scroll do Mouse</b>: Zoom In / Out</div>
 </div>
 
 <div id="pick-popup">
+  <button id="btn-close-pk" onclick="document.getElementById('pick-popup').style.display='none'">✕</button>
   <span class="tag-info" id="pk-cat">PRIMITIVA 3D</span>
   <h4 id="pk-nome">Objeto</h4>
   <div><b>Material:</b> <span id="pk-mat">-</span></div>
   <div><b>Coordenadas Clique:</b> <span id="pk-coord">-</span></div>
-  <div><b>Transformação / Detalhe:</b> <span id="pk-desc">-</span></div>
+  <div><b>Normal Face:</b> <span id="pk-norm">-</span></div>
+  <div><b>Especificação Técnica:</b> <span id="pk-desc">-</span></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -587,11 +590,11 @@ def renderizar_inspecao_webgl_roblox(modo_noite=False):
 
   const via = new THREE.Mesh(new THREE.BoxGeometry(66, 0.1, 14), new THREE.MeshStandardMaterial({{ color: 0x1e293b }}));
   via.position.set(35, 0.05, 9); scene.add(via);
-  registrarPick(via, "Via Asfáltica CT", "Cubo + Textura Procedural", "Asfalto CBUQ", "Escala (66m, 0.1m, 14m) com faixas viárias.");
+  registrarPick(via, "Via Asfáltica CT", "Cubo + Textura Procedural", "Asfalto CBUQ (Kd=0.22)", "Escala (66m, 0.1m, 14m) com faixas viárias.");
 
   const calcada = new THREE.Mesh(new THREE.BoxGeometry(66, 0.2, 44), new THREE.MeshStandardMaterial({{ color: MODO_NOITE ? 0x334155 : 0xcbd5e1 }}));
   calcada.position.set(35, 0.1, 38); scene.add(calcada);
-  registrarPick(calcada, "Calçada Bloco 734", "Cubo + Textura Procedural", "Concreto Rejuntado", "Passeio frontal com juntas a cada 1.5m.");
+  registrarPick(calcada, "Calçada Bloco 734", "Cubo + Textura Procedural", "Concreto Rejuntado (Kd=0.68)", "Passeio frontal com juntas a cada 1.5m.");
 
   // Bloco 734
   const shapeBloco = new THREE.Shape();
@@ -622,12 +625,24 @@ def renderizar_inspecao_webgl_roblox(modo_noite=False):
 
   for (let k = 0; k < 5; k++) {{
     const fc = k - 2; const L = 2.35 * (1 - 0.055 * fc);
-    const losango = new THREE.Mesh(new THREE.BoxGeometry(L, L, 0.16), new THREE.MeshStandardMaterial({{ color: 0xf8fafc, wireframe: false }}));
+    const losango = new THREE.Mesh(new THREE.BoxGeometry(L, L, 0.16), new THREE.MeshStandardMaterial({{ color: 0xf8fafc }}));
     losango.position.set(15.0 + fc * 0.22, 0.48 + L / Math.SQRT2, 22.0 + fc * 0.58);
     losango.rotation.set(0, THREE.MathUtils.degToRad(-24), Math.PI / 4);
     scene.add(losango);
     registrarPick(losango, `Escultura Cinética - Losango ${{k+1}}`, "Perfil Rotacionado 45° + Translação", "Aço Pintura Branca (R=0.14)", `Quadro paramétrico #${{k+1}} (L=${{L.toFixed(2)}}m).`);
   }}
+
+  // Boneco Articulado Estilo Roblox na Praça para Inspeção
+  const boneco = new THREE.Group();
+  const matPele = new THREE.MeshStandardMaterial({{ color: 0xfcd34d }});
+  const bTorso = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.85, 0.4), new THREE.MeshStandardMaterial({{ color: 0x2563eb }}));
+  bTorso.position.y = 1.15; boneco.add(bTorso);
+  registrarPick(bTorso, "Avatar Roblox (Torso)", "Hierarquia Articulada 3D", "Polímero Azul", "Centro de massa do personagem do Walkthrough.");
+  const bCabeca = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.48, 0.48), matPele);
+  bCabeca.position.y = 1.85; boneco.add(bCabeca);
+  registrarPick(bCabeca, "Avatar Roblox (Cabeça)", "Hierarquia Articulada 3D", "Polímero Amarelo", "Nó filho da hierarquia do personagem.");
+  boneco.position.set(17.5, 0.2, 16.5);
+  scene.add(boneco);
 
   // Árvores e Postes
   [[10.5, 28.5, 1.15], [11.5, 38.0, 1.25], [37.5, 17.5, 0.9]].forEach(([ax, az, esc], idx) => {{
@@ -693,10 +708,12 @@ def renderizar_inspecao_webgl_roblox(modo_noite=False):
         h.object.material.emissive.setHex(0x0284c7);
         lastHighlight = h.object;
       }}
+      const n = h.face ? h.face.normal : new THREE.Vector3(0, 1, 0);
       document.getElementById('pk-cat').textContent = info.cat;
       document.getElementById('pk-nome').textContent = info.nome;
       document.getElementById('pk-mat').textContent = info.mat;
       document.getElementById('pk-coord').textContent = `X=${{h.point.x.toFixed(2)}}m, Y=${{h.point.y.toFixed(2)}}m, Z=${{h.point.z.toFixed(2)}}m`;
+      document.getElementById('pk-norm').textContent = `(${{n.x.toFixed(2)}}, ${{n.y.toFixed(2)}}, ${{n.z.toFixed(2)}})`;
       document.getElementById('pk-desc').textContent = info.desc;
       document.getElementById('pick-popup').style.display = 'block';
     }}
@@ -1095,7 +1112,6 @@ def renderizar_walkthrough_webgl(modo_noite=False):
     if (isDead) return;
     isDead = true;
     deathCount++;
-    // Se morrer, zera todas as missões concluídas!
     zerarTodasMissoes();
 
     document.getElementById('wasted-sub').textContent = motivo;
@@ -1147,7 +1163,6 @@ def renderizar_walkthrough_webgl(modo_noite=False):
       zonasFoto.forEach((zf) => {{
         if (Math.hypot(player.position.x - zf.x, player.position.z - zf.z) < 2.2) {{
           if (zf.id === 'foto_carro') {{
-            // Exige um carro passando próximo no momento do clique!
             const temCarroPerto = carros.some(c => Math.abs(c.mesh.position.x - 33.0) < 11.0);
             if (!temCarroPerto) return;
           }}
@@ -1214,7 +1229,6 @@ def renderizar_walkthrough_webgl(modo_noite=False):
     }} else {{
       let promptTexto = "";
 
-      // Zonas Fotográficas
       zonasFoto.forEach((zf) => {{
         if (Math.hypot(player.position.x - zf.x, player.position.z - zf.z) < 2.2) {{
           if (zf.id === 'foto_carro') {{
@@ -1279,7 +1293,7 @@ def renderizar_walkthrough_webgl(modo_noite=False):
       }}
       if (atravessouRua && player.position.z >= 16.5) marcarCheck('rua');
 
-      // Escaladas (Escada, Postes, Árvore 1)
+      // Escaladas
       let escalando = false;
       if (Math.hypot(player.position.x - 59.35, player.position.z - 24.0) < 1.35) {{
         promptTexto = "Segure [E] para subir a escada até o telhado!";
@@ -1303,7 +1317,6 @@ def renderizar_walkthrough_webgl(modo_noite=False):
       }});
       if (subiuPoste && !escalando && player.position.y <= 0.35) {{ marcarCheck('poste'); subiuPoste = false; }}
 
-      // Árvore 1 (Bosque Esq X=10.5, Z=28.5)
       if (Math.hypot(player.position.x - 10.5, player.position.z - 28.5) < 1.3) {{
         promptTexto = "Segure [E] para escalar a árvore (Não suba sem parar!)";
         if (keys['KeyE']) {{
@@ -1589,7 +1602,6 @@ with aba_rc:
         st.warning(f"**Resultado do Raio:** {info_rc['nome']}")
 
     with col_img:
-      # Desenha mira vermelha discreta no pixel inspecionado
       img_marcada = img_atual.copy()
       r_m = max(3, w_img // 75)
       y0, y1 = max(0, py_sel - r_m), min(h_img, py_sel + r_m + 1)
