@@ -435,6 +435,31 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     border-radius: 8px; padding: 10px; text-align: center;
   }
   .inv-slot.collected { border-color: #22c55e; background: rgba(20, 83, 45, 0.28); }
+
+  /* CONTROLES TOUCH ESTILO ROBLOX PARA MOBILE / TABLET */
+  #touch-controls {
+    position: absolute; bottom: 66px; left: 14px;
+    display: none; flex-direction: column; align-items: center; gap: 6px;
+    z-index: 25; pointer-events: auto;
+  }
+  .touch-row { display: flex; gap: 6px; justify-content: center; }
+  .touch-btn {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: rgba(15, 23, 42, 0.78); backdrop-filter: blur(6px);
+    border: 1.5px solid rgba(56, 189, 248, 0.65);
+    color: #f8fafc; font-size: 18px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; touch-action: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+  }
+  .touch-btn:active, .touch-btn.pressed {
+    background: rgba(37, 99, 235, 0.85);
+    transform: scale(0.94);
+  }
+  @media (pointer: coarse), (max-width: 900px) {
+    #touch-controls { display: flex; }
+  }
+  .action-btn.lantern { border-color: #fde047; color: #fef08a; }
 </style>
 </head>
 <body>
@@ -515,7 +540,19 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   </div>
 
   <!-- BOTÕES DE AÇÃO INFERIORES DIREITOS -->
+  <div id="touch-controls" aria-label="Controles de movimento mobile">
+    <div class="touch-row">
+      <button class="touch-btn" data-key="w" title="Frente">▲</button>
+    </div>
+    <div class="touch-row">
+      <button class="touch-btn" data-key="a" title="Esquerda">◀</button>
+      <button class="touch-btn" data-key="s" title="Trás">▼</button>
+      <button class="touch-btn" data-key="d" title="Direita">▶</button>
+    </div>
+  </div>
+
   <div id="hud-bottom-right">
+    <button class="action-btn lantern" id="btn-lantern">🔦 Lanterna [L]</button>
     <button class="action-btn photo" id="btn-photo">📸 Foto [P]</button>
     <button class="action-btn creto" id="btn-creto">🎓 Falar com Creto [E]</button>
     <button class="action-btn dance" id="btn-dance">💃 Dançar [C]</button>
@@ -888,14 +925,16 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     });
   }
 
-  // Piso Urbano + Faixa de Pedestres em X = 25.5..28.5
-  addBox(66, 0.1, 14, matAsfalto, 35, 0.05, 9, 0, false);
-  addBox(64, 0.02, 0.14, matFaixa, 35, 0.11, 11.5, 0, false);
-  addBox(64, 0.02, 0.14, matFaixa, 35, 0.11, 11.9, 0, false);
-  for (let zf = 3.2; zf <= 14.8; zf += 1.2) {
-    addBox(3.0, 0.02, 0.58, matFaixaBranca, 27.0, 0.11, zf, 0, false);
+  // Piso Urbano + Faixa de Pedestres em X = 25.5..28.5 + Calçada Ampliada na Frente do Bloco
+  addBox(68, 0.1, 11.5, matAsfalto, 35, 0.05, 7.25, 0, false);
+  addBox(66, 0.02, 0.14, matFaixa, 35, 0.11, 9.8, 0, false);
+  addBox(66, 0.02, 0.14, matFaixa, 35, 0.11, 10.2, 0, false);
+  for (let zf = 2.2; zf <= 12.2; zf += 1.15) {
+    addBox(3.2, 0.02, 0.56, matFaixaBranca, 27.0, 0.11, zf, 0, false);
   }
-  addBox(66, 0.2, 44, matCalcada, 35, 0.10, 38, 0, false);
+  // Calçada principal ampla (z de 13.0 até 61.0 -> centro Z=37.0, profundidade 48) + aba frontal até Z=12.8
+  addBox(68, 0.2, 48, matCalcada, 35, 0.10, 37.0, 0, false);
+  addBox(68, 0.2, 4.0, matCalcada, 35, 0.10, 14.5, 0, false);
 
   // Bloco 734
   addBox(22, 6.6, 33, matAlvenaria, 48, 3.3, 36.5);
@@ -1093,32 +1132,54 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   placaEscada.position.set(59.6, 2.6, 24.0);
   scene.add(placaEscada);
 
-  // Árvores Escaláveis ([R]) + Coruja do Jumpscare
+  // Árvores Escaláveis ([R]) + Coruja do Jumpscare + Arbustos Leves (Sem sobrecarga)
   const arvoresCoords = [
-    { nome: "Árvore Bosque Esq.", x: 10.5, z: 28.5, h: 4.5, esc: 1.15, temCoruja: false },
+    { nome: "Árvore Bosque Esq.", x: 8.5, z: 25.0, h: 4.5, esc: 1.15, temCoruja: false },
     { nome: "Árvore Sombria (Coruja)", x: 11.5, z: 38.0, h: 4.9, esc: 1.25, temCoruja: true },
-    { nome: "Árvore Praça Dir.", x: 37.5, z: 17.5, h: 3.8, esc: 0.90, temCoruja: false }
+    { nome: "Árvore Praça Dir.", x: 37.5, z: 16.2, h: 3.8, esc: 0.90, temCoruja: false },
+    { nome: "Árvore Calçada Oeste", x: 6.2, z: 17.5, h: 4.2, esc: 1.05, temCoruja: false },
+    { nome: "Árvore Jardim Lateral", x: 7.5, z: 32.5, h: 4.4, esc: 1.10, temCoruja: false }
   ];
+  const troncoGeo = new THREE.CylinderGeometry(0.28, 0.42, 3.2, 10);
+  const copaGeo = new THREE.SphereGeometry(1.0, 10, 8);
+  const arbustoGeo = new THREE.DodecahedronGeometry(0.62, 0);
+
   arvoresCoords.forEach((arv) => {
-    const tMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.28 * arv.esc, 0.42 * arv.esc, 3.2 * arv.esc, 12), matTronco);
+    const tMesh = new THREE.Mesh(troncoGeo, matTronco);
+    tMesh.scale.set(arv.esc, arv.esc, arv.esc);
     tMesh.position.set(arv.x, 0.2 + 1.6 * arv.esc, arv.z);
     tMesh.castShadow = true;
     scene.add(tMesh);
     [[0, 3.6, 0, 1.65, matFolha1], [-1.1, 3.2, 0.6, 1.25, matFolha2], [1.1, 3.3, -0.5, 1.30, matFolha2], [0.3, 4.5, 0.4, 1.20, matFolha1]].forEach(([ox, oy, oz, r, m]) => {
-      const cMesh = new THREE.Mesh(new THREE.SphereGeometry(r * arv.esc, 14, 12), m);
+      const cMesh = new THREE.Mesh(copaGeo, m);
+      cMesh.scale.setScalar(r * arv.esc);
       cMesh.position.set(arv.x + ox * arv.esc, oy * arv.esc, arv.z + oz * arv.esc);
       cMesh.castShadow = true;
       scene.add(cMesh);
     });
     if (arv.temCoruja) {
       const coruja = new THREE.Mesh(
-        new THREE.ConeGeometry(0.35, 0.95, 12),
+        new THREE.ConeGeometry(0.35, 0.95, 10),
         new THREE.MeshStandardMaterial({ color: 0x312e81, emissive: 0x1e1b4b })
       );
       coruja.position.set(arv.x, 0.2 + 5.1 * arv.esc, arv.z);
       scene.add(coruja);
     }
     registrarAR(arv.nome, "ESCALÁVEL [R] • REFÚGIO CONTRA VIGILANTES", "Pressione [R] próximo ao tronco para escalar usando W/S e equilibrando com A/D!", "Cilindro + Esferas (Quatérnios)", [arv.x, 2.8 * arv.esc, arv.z], [3.4 * arv.esc, 5.4 * arv.esc, 3.4 * arv.esc]);
+  });
+
+  // Arbustos decorativos na área lateral e calçada ampla (geometria leve compartilhada)
+  const arbustosPos = [
+    [6.5, 21.5, 0.95], [9.8, 21.2, 0.80], [7.2, 28.8, 1.05], [10.2, 34.5, 0.90],
+    [13.5, 15.2, 0.85], [17.8, 15.0, 0.78], [39.5, 15.4, 0.85], [51.5, 15.6, 0.95]
+  ];
+  arbustosPos.forEach(([ax, az, sc], idx) => {
+    const arb = new THREE.Mesh(arbustoGeo, idx % 2 === 0 ? matFolha2 : matFolha1);
+    arb.scale.set(sc * 1.2, sc * 0.85, sc);
+    arb.position.set(ax, 0.2 + 0.45 * sc, az);
+    arb.castShadow = true;
+    arb.receiveShadow = true;
+    scene.add(arb);
   });
 
   // Postes de Iluminação Escaláveis ([R])
@@ -1229,8 +1290,8 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     animatedCars.push({ nome, grp, rodas, dirX, speed, honkTimer: 0 });
   }
 
-  criarVeiculoAnimado("SUV Prata na Via CT", 12.0, 7.2, 1, 8.5, 0xcbd5e1);
-  criarVeiculoAnimado("Carro Esportivo Vermelho", 58.0, 10.6, -1, 11.5, 0xdc2626);
+  criarVeiculoAnimado("SUV Prata na Via CT", 12.0, 5.6, 1, 8.5, 0xcbd5e1);
+  criarVeiculoAnimado("Carro Esportivo Vermelho", 58.0, 8.6, -1, 11.5, 0xdc2626);
 
   // Avatar Articulado Estilo Roblox
   function criarAvatarRoblox(x, y, z, rotDeg, corTorso, corCabeca, corCalca, esc = 1.0) {
@@ -1254,12 +1315,76 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     return { grp, bE, bD, pE, pD, torso, cab };
   }
 
-  // Estudantes na Praça
-  criarAvatarRoblox(18.6, 0.2, 18.8, -35, 0x2563eb, 0xfacc15, 0x1e293b, 0.95);
-  criarAvatarRoblox(19.6, 0.2, 18.2, -55, 0xea580c, 0xfacc15, 0x1e293b, 0.92);
+  // Alunos na Praça com Ações & Dicas (2ª vez na cadeira vs Estudando muito para passar)
+  const alunoSegundaVezPos = new THREE.Vector3(17.8, 0.2, 16.5);
+  const alunoSegundaVez = criarAvatarRoblox(alunoSegundaVezPos.x, alunoSegundaVezPos.y, alunoSegundaVezPos.z, -25, 0xd97706, 0xfacc15, 0x1e293b, 0.96);
+  // Caderno / anotações na mão do aluno repetente
+  const cadernoRep = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.05, 0.24), matPapel);
+  cadernoRep.position.set(0, -0.35, 0.16);
+  alunoSegundaVez.bD.add(cadernoRep);
+  const placaAluno1 = criarPlacaFlutuante("😅 ALUNO (2ª VEZ) • DICAS [E]", "#78350f", "#fbbf24", 3.5, 0.65);
+  placaAluno1.position.set(alunoSegundaVezPos.x, 2.55, alunoSegundaVezPos.z);
+  scene.add(placaAluno1);
 
-  // Personagem do Prof. Creto em destaque na Praça (X=31.5, Z=23.5) com Placa Flutuante, Farol & Clique Direto!
-  const cretoPos = new THREE.Vector3(31.5, 0.2, 23.5);
+  const alunoEstudiosoPos = new THREE.Vector3(19.8, 0.2, 16.2);
+  const alunoEstudioso = criarAvatarRoblox(alunoEstudiosoPos.x, alunoEstudiosoPos.y, alunoEstudiosoPos.z, 20, 0x2563eb, 0xfed7aa, 0x0f172a, 0.95);
+  // Livro aberto / caderno de estudos na mão do aluno estudioso
+  const livroEst = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.26), new THREE.MeshStandardMaterial({ color: 0x38bdf8 }));
+  livroEst.position.set(0, -0.35, 0.16);
+  alunoEstudioso.bD.add(livroEst);
+  const placaAluno2 = criarPlacaFlutuante("📚 ESTUDANDO MUITO • DICAS [E]", "#1e3a8a", "#38bdf8", 3.6, 0.65);
+  placaAluno2.position.set(alunoEstudiosoPos.x, 2.55, alunoEstudiosoPos.z);
+  scene.add(placaAluno2);
+
+  const dicaAluno1Action = {
+    id: "aluno_2a_vez",
+    titulo: "Aluno (Fazendo a Cadeira pela 2ª Vez)",
+    x: alunoSegundaVezPos.x,
+    z: alunoSegundaVezPos.z,
+    acaoFn: () => {
+      SoundEngine.playCollect();
+      mostrarAlerta(
+        "😅 Aluno (2ª vez): 'Na 1ª eu enrolei! Faça o Trabalho Final cedo, entregue todas as atividades e revise pela autocorreção da prova!'",
+        "alert-iot", 4600, "dica_aluno"
+      );
+    }
+  };
+  const dicaAluno2Action = {
+    id: "aluno_estudioso",
+    titulo: "Aluno (Estudando Muito para Passar)",
+    x: alunoEstudiosoPos.x,
+    z: alunoEstudiosoPos.z,
+    acaoFn: () => {
+      SoundEngine.playCollect();
+      mostrarAlerta(
+        "📚 Aluno (Focado): 'Dica de ouro: avance o Trabalho Final, não perca o prazo das atividades e use a autocorreção da prova para fixar!'",
+        "alert-info", 4600, "dica_aluno"
+      );
+    }
+  };
+
+  [alunoSegundaVez.torso, alunoSegundaVez.cab].forEach(m => { m.userData.totem = dicaAluno1Action; clickableTotems.push(m); });
+  [alunoEstudioso.torso, alunoEstudioso.cab].forEach(m => { m.userData.totem = dicaAluno2Action; clickableTotems.push(m); });
+
+  registrarAR(
+    "Colega Fazendo a Cadeira pela 2ª Vez",
+    "ALUNO • DICAS DE APROVAÇÃO [E]",
+    "Faz a cadeira pela 2ª vez e compartilha dicas: foque no Trabalho Final, entregue as atividades e faça a autocorreção da prova.",
+    "Avatar Articulado + Caderno • [E] Ouvir Dica",
+    [alunoSegundaVezPos.x, 1.1, alunoSegundaVezPos.z], [1.4, 2.3, 1.4],
+    { totem: dicaAluno1Action }
+  );
+  registrarAR(
+    "Colega Estudando Muito para Passar",
+    "ALUNO • DICAS DE ESTUDO [E]",
+    "Estudando firme para passar de primeira: dá dicas sobre Trabalho Final, atividades práticas e autocorreção da prova.",
+    "Avatar Articulado + Apostila • [E] Ouvir Dica",
+    [alunoEstudiosoPos.x, 1.1, alunoEstudiosoPos.z], [1.4, 2.3, 1.4],
+    { totem: dicaAluno2Action }
+  );
+
+  // Personagem do Prof. Creto deslocado para a área lateral aberta junto ao poste (X=9.5, Z=22.2)
+  const cretoPos = new THREE.Vector3(9.5, 0.2, 22.2);
   const profCreto = criarAvatarRoblox(cretoPos.x, cretoPos.y, cretoPos.z, 180, 0xf8fafc, 0xfed7aa, 0x1e3a8a, 1.12);
   const oculos = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.11, 0.08), matEsquadria);
   oculos.position.set(0, 1.88, 0.25);
@@ -1299,10 +1424,10 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     { totem: cretoTotemAction }
   );
 
-  // Vigilantes Patrimoniais
+  // Vigilantes Patrimoniais (1 deslocado para a área lateral aberta ao lado do poste, 1 na calçada frontal)
   const vigilantes = [
-    { avatar: criarAvatarRoblox(21.0, 0.2, 24.5, 180, 0x1e3a8a, 0xfdba74, 0x0f172a, 1.02), home: new THREE.Vector3(21.0, 0.2, 24.5), alertado: false },
-    { avatar: criarAvatarRoblox(34.5, 0.2, 24.5, 180, 0x1e3a8a, 0xfdba74, 0x0f172a, 1.02), home: new THREE.Vector3(34.5, 0.2, 24.5), alertado: false }
+    { avatar: criarAvatarRoblox(7.8, 0.2, 20.4, 180, 0x1e3a8a, 0xfdba74, 0x0f172a, 1.02), home: new THREE.Vector3(7.8, 0.2, 20.4), alertado: false },
+    { avatar: criarAvatarRoblox(32.5, 0.2, 15.2, 180, 0x1e3a8a, 0xfdba74, 0x0f172a, 1.02), home: new THREE.Vector3(32.5, 0.2, 15.2), alertado: false }
   ];
 
   // Cachorro Guardião movido para área escondida e oposta (Fundos do Bloco 734: X=46.0, Z=56.2)
@@ -1505,11 +1630,39 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   // ============================================================================
   // 8. JOGADOR ARTICULADO, MINI-QUESTS, VIGILANTES, MODO FOTO & QUIZ CRETO
   // ============================================================================
-  const player = criarAvatarRoblox(24.0, 0.2, 14.2, 0, 0x0284c7, 0xfacc15, 0x0f172a, 1.0);
+  const player = criarAvatarRoblox(24.0, 0.2, 15.2, 0, 0x0284c7, 0xfacc15, 0x0f172a, 1.0);
   const xicaraMao = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.055, 0.13, 12), matPapel);
   xicaraMao.position.set(0, -0.38, 0.14);
   xicaraMao.visible = false;
   player.bD.add(xicaraMao);
+
+  // Lanterna estilo cone (SpotLight) na mão do personagem para imersão survival horror
+  const lanternaMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.045, 0.065, 0.24, 10),
+    new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.3 })
+  );
+  lanternaMesh.rotation.x = Math.PI / 2;
+  lanternaMesh.position.set(0, -0.38, 0.18);
+  player.bE.add(lanternaMesh);
+
+  const playerLantern = new THREE.SpotLight(0xfffbeb, lanternEnabled ? 3.2 : 0.0, 26, Math.PI / 6.5, 0.45, 1.2);
+  playerLantern.position.set(0, 1.35, 0.35);
+  const lanternTarget = new THREE.Object3D();
+  lanternTarget.position.set(0, 0.65, 8.5);
+  player.grp.add(playerLantern);
+  player.grp.add(lanternTarget);
+  playerLantern.target = lanternTarget;
+
+  function alternarLanterna() {
+    lanternEnabled = !lanternEnabled;
+    playerLantern.intensity = lanternEnabled ? 3.2 : 0.0;
+    SoundEngine.playSwitch();
+    mostrarAlerta(
+      lanternEnabled ? "🔦 Lanterna LIGADA (cone de luz ativo)" : "🔦 Lanterna DESLIGADA",
+      "alert-info", 1800, "info"
+    );
+  }
+  document.getElementById('btn-lantern').addEventListener('click', () => { alternarLanterna(); canvas.focus(); });
 
   const steamParticles = [];
   for (let i = 0; i < 12; i++) {
@@ -1530,6 +1683,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   let isPaused = false;
   let survivalMode = false;
   let isDead = false;
+  let lanternEnabled = MODO_NOITE;
   let inCoffeeCutscene = false;
   let coffeeTimer = 0;
   let inDanceCutscene = false;
@@ -1542,7 +1696,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   let stepAccumulator = 0;
 
   const pState = {
-    pos: new THREE.Vector3(24.0, 0.2, 14.2),
+    pos: new THREE.Vector3(24.0, 0.2, 15.2),
     velY: 0,
     yaw: Math.PI,
     camYaw: Math.PI,
@@ -1686,6 +1840,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   }
 
   function dispararJumpscare(emoji = '🦉👁️👁️', titulo = 'SUSTO NO CAMPUS CT!', sub = 'A Coruja Guardiã das Copas te pegou desprevenido!') {
+    if (!MODO_NOITE) return;
     if (pState.jumpscareCooldown > 0) return;
     pState.jumpscareCooldown = 8.0;
     SoundEngine.playScare();
@@ -1717,7 +1872,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   document.getElementById('btn-respawn').addEventListener('click', () => {
     isDead = false;
     energy = 100;
-    pState.pos.set(24.0, 0.2, 14.2);
+    pState.pos.set(24.0, 0.2, 15.2);
     pState.velY = 0;
     pState.wasOnRoof = false;
     pState.climbing = null;
@@ -1945,7 +2100,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     if (distCreto <= 4.2 && pState.pos.y < 2.2) {
       abrirQuizCreto();
     } else {
-      mostrarAlerta("🎓 Aproxime-se do Prof. Creto na praça (X=31.5, Z=23.5) e pressione [E] para falar com ele!", "alert-info", 2500, "info");
+      mostrarAlerta("🎓 Aproxime-se do Prof. Creto na área lateral (X=9.5, Z=22.2) e pressione [E] para falar com ele!", "alert-info", 2500, "info");
     }
     canvas.focus();
   });
@@ -2114,18 +2269,40 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     } else if (k === 'p') {
       if (!visorFotoAtivo) alternarVisorFoto();
       else tirarFoto();
+    } else if (k === 'l') {
+      alternarLanterna();
     } else if (k === 'g') {
       const distCreto = Math.hypot(pState.pos.x - cretoPos.x, pState.pos.z - cretoPos.z);
       if (distCreto <= 4.2 && pState.pos.y < 2.2) {
         abrirQuizCreto();
       } else {
-        mostrarAlerta("🎓 Vá até o Prof. Creto na praça (X=31.5, Z=23.5) e pressione [E] para interagir!", "alert-info", 2500, "info");
+        mostrarAlerta("🎓 Vá até o Prof. Creto na área lateral (X=9.5, Z=22.2) e pressione [E] para interagir!", "alert-info", 2500, "info");
       }
     } else if (k === 'c') {
       iniciarCutsceneDanca("💃 Comemorando no Bloco 734!");
     }
   });
   window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+  // Suporte a toque (D-Pad mobile estilo Roblox)
+  document.querySelectorAll('.touch-btn[data-key]').forEach((btn) => {
+    const tKey = btn.getAttribute('data-key');
+    const pressFn = (ev) => {
+      ev.preventDefault();
+      SoundEngine.init();
+      keys[tKey] = true;
+      btn.classList.add('pressed');
+    };
+    const releaseFn = (ev) => {
+      ev.preventDefault();
+      keys[tKey] = false;
+      btn.classList.remove('pressed');
+    };
+    btn.addEventListener('pointerdown', pressFn);
+    btn.addEventListener('pointerup', releaseFn);
+    btn.addEventListener('pointerleave', releaseFn);
+    btn.addEventListener('pointercancel', releaseFn);
+  });
 
   let isDragging = false, lastMX = 0, lastMY = 0;
   window.addEventListener('mousemove', (e) => {
@@ -2435,12 +2612,23 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     }
 
+    // Regra de Trânsito: Carros param com segurança se o personagem estiver na faixa de pedestres (X ~ 27.0)
+    const pedestreNaFaixa = (pState.pos.x >= 25.0 && pState.pos.x <= 29.0 && pState.pos.z <= 13.0 && pState.pos.y < 1.6);
+
     // Carros Animados na Via CT
     animatedCars.forEach((car) => {
-      car.grp.position.x += car.dirX * car.speed * dt;
+      let bloqueadoFaixa = false;
+      if (pedestreNaFaixa) {
+        const distAteFaixa = car.dirX > 0 ? (24.4 - car.grp.position.x) : (car.grp.position.x - 29.6);
+        if (distAteFaixa > 0 && distAteFaixa < 8.5) {
+          bloqueadoFaixa = true;
+        }
+      }
+      const velAtual = bloqueadoFaixa ? 0 : car.speed;
+      car.grp.position.x += car.dirX * velAtual * dt;
       if (car.dirX > 0 && car.grp.position.x > 65.0) car.grp.position.x = 5.0;
       if (car.dirX < 0 && car.grp.position.x < 5.0) car.grp.position.x = 65.0;
-      car.rodas.forEach(r => { r.rotation.x += car.dirX * car.speed * dt * 2.5; });
+      car.rodas.forEach(r => { r.rotation.x += car.dirX * velAtual * dt * 2.5; });
 
       if (car.honkTimer > 0) car.honkTimer -= dt;
       const dx = Math.abs(pState.pos.x - car.grp.position.x);
@@ -2688,14 +2876,14 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     }
 
-    if (pState.pos.y < 1.5 && pState.pos.z < 15.8) {
+    if (pState.pos.y < 1.5 && pState.pos.z < 12.8) {
       SoundEngine.playIoT();
       mostrarAlerta('📡 ALERTA IoT VIÁRIO: Use a faixa de pedestres (X=27) para atravessar!', 'alert-iot', 2200, 'iot');
       if (pState.pos.x >= 25.0 && pState.pos.x <= 29.0 && pState.pos.z <= 4.0) {
         pState.crossedOut = true;
         mostrarAlerta('🚸 Metade da travessia concluída — agora retorne pela faixa!', 'alert-info', 2200, 'info');
       }
-    } else if (pState.crossedOut && pState.pos.z >= 16.2) {
+    } else if (pState.crossedOut && pState.pos.z >= 13.2) {
       pState.crossedOut = false;
       pState.quests.travessia = true;
       mostrarAlerta('✅ Mini-Quest Concluída: Travessia na faixa e retorno em segurança!', 'alert-success', 2800, 'success');
@@ -2772,7 +2960,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
             document.getElementById('vigilante-badge').textContent = '👮 Vigilância: Calma';
             document.getElementById('vigilante-badge').style.color = '#93c5fd';
             aplicarDano(20, 'Detido pelo Vigilante Patrimonial!', true);
-            pState.pos.set(24.0, 0.2, 14.2);
+            pState.pos.set(24.0, 0.2, 15.2);
           }
         }
       } else {
