@@ -1258,7 +1258,7 @@ def montar_cenario():
   # --- ÁRVORES NO ENTORNO ---
   arvores_cfg = [
       ('Árvore Bosque Esq.', 10.5, 28.5, 1.15),
-      ('Árvore Ninho Ave (Fundo Esq.)', 11.5, 38.0, 1.25),
+      ('Árvore Fundo Esq.', 11.5, 38.0, 1.25),
       ('Árvore Praça Dir.', 37.5, 17.5, 0.90),
   ]
   esferas_copa_rel = [
@@ -1493,7 +1493,7 @@ def montar_cenario():
 
 
 # ==============================================================================
-# 7. MOTOR DE RENDERIZAÇÃO COM SUPERSAMPLING 2x2 E BUFFERS DE PICKING
+# 7. MOTOR DE RENDERIZAÇÃO COM SUPERSAMPLING 4x E PICKING POR PIXEL
 # ==============================================================================
 class RenderizadorCT:
 
@@ -1611,6 +1611,64 @@ class RenderizadorCT:
         sub_mat_min = np.where(m, sub_m, sub_mat_min)
 
     return t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min
+
+  def inspecionar_pixel_renderizado(self, cfg, px, py, incluir_objs=True):
+    M_wc = construir_Mwc(cfg['eye'], cfg['at'], cfg['up'])
+    for prim in self.cena:
+      if prim.eh_obj and not incluir_objs:
+        continue
+      prim.preparar_camera(M_wc)
+
+    xmin, xmax, ymin, ymax = cfg['win']
+    d = cfg['d']
+    u_val = xmin + ((px + 0.5) / self.W) * (xmax - xmin)
+    v_val = ymax + ((py + 0.5) / self.H) * (ymin - ymax)
+
+    U = np.array([[u_val]], dtype=np.float64)
+    V = np.array([[v_val]], dtype=np.float64)
+
+    if cfg['proj'] == 'perspectiva':
+      O_cam = np.zeros((1, 1, 3), dtype=np.float64)
+      D_cam = np.stack([U, V, np.full_like(U, -d)], axis=-1)
+      D_cam /= np.linalg.norm(D_cam, axis=-1, keepdims=True)
+    elif cfg['proj'] == 'ortografica':
+      O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
+      D_cam = np.array([[[0.0, 0.0, -1.0]]], dtype=np.float64)
+    else:
+      O_cam = np.stack([U, V, np.zeros_like(U)], axis=-1)
+      l_ob, ang_ob = 0.5, np.deg2rad(45.0)
+      d_vec = np.array([-l_ob * np.cos(ang_ob), -l_ob * np.sin(ang_ob), -1.0])
+      d_vec /= np.linalg.norm(d_vec)
+      D_cam = d_vec.reshape(1, 1, 3)
+
+    t_min, _, P_w_min, obj_idx, sub_mat_min, N_w_min = self.tracar_raios(
+        O_cam, D_cam, incluir_objs=incluir_objs
+    )
+    idx_hit = int(obj_idx[0, 0])
+    if idx_hit < 0 or not np.isfinite(t_min[0, 0]):
+      return {
+          'hit': False,
+          'nome': 'Céu / Horizonte (Sem interseção)',
+          'distancia': None,
+      }
+
+    prim = self.cena[idx_hit]
+    mat = prim.mat
+    if prim.tipo == 'bloco_ct_arqueado':
+      mat = self.materiais_bloco.get(int(sub_mat_min[0, 0]), prim.mat)
+
+    return {
+        'hit': True,
+        'nome': prim.nome,
+        'tipo_primitiva': prim.tipo.upper(),
+        'material': mat.nome,
+        'kd': tuple(np.round(mat.kd, 3)),
+        'ke': tuple(np.round(mat.ke, 3)),
+        'refletividade': float(mat.refletividade),
+        'distancia': float(t_min[0, 0]),
+        'ponto_world': tuple(np.round(P_w_min[0, 0], 3)),
+        'normal_world': tuple(np.round(N_w_min[0, 0], 3)),
+    }
 
   def sombrear(
       self,
@@ -1851,9 +1909,7 @@ class RenderizadorCT:
     v_base = np.linspace(ymax + 0.5 * dv, ymin - 0.5 * dv, self.H)
 
     img_acum = np.zeros((self.H, self.W, 3), dtype=np.float64)
-    pick_buffers = {}
-
-    for idx_sub, (ox, oy) in enumerate(offsets):
+    for ox, oy in offsets:
       U, V = np.meshgrid(u_base + ox * du, v_base + oy * dv)
       if cfg['proj'] == 'perspectiva':
         O_cam = np.zeros((self.H, self.W, 3), dtype=np.float64)
@@ -1873,15 +1929,6 @@ class RenderizadorCT:
       t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min = self.tracar_raios(
           O_cam, D_cam, incluir_objs=incluir_objs
       )
-      if idx_sub == 0:
-        pick_buffers = {
-            't_min': t_min,
-            'P_w_min': P_w_min,
-            'N_w_min': N_w_min,
-            'obj_idx': obj_idx,
-            'sub_mat_min': sub_mat_min,
-        }
-
       img_sub = self.sombrear(
           O_cam,
           D_cam,
@@ -1904,8 +1951,4 @@ class RenderizadorCT:
     img = np.power(img, 1.0 / 1.12)
     turno_txt = 'NOITE' if modo_noite else 'DIA'
     aa_txt = ' | SSAA 4x' if ssaa else ''
-    return (
-        img,
-        f"{cfg['titulo']} [{turno_txt}{aa_txt}] ({time.time() - t0:.2f}s)",
-        pick_buffers,
-    )
+    return img, f"{cfg['titulo']} [{turno_txt}{aa_txt}] ({time.time() - t0:.2f}s)"
