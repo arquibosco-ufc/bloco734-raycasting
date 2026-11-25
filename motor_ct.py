@@ -353,11 +353,8 @@ class CilindroY(Primitiva):
         for cand in [(-b - sqrt_d) * inv_2a, (-b + sqrt_d) * inv_2a]:
             y_cand = O[:, 1] + cand * D[:, 1]
             ok = (
-                valid
-                & (cand > 1e-4)
-                & (cand < t_hit)
-                & (y_cand >= self.y0)
-                & (y_cand <= self.y1)
+                valid & (cand > 1e-4) & (cand < t_hit)
+                & (y_cand >= self.y0) & (y_cand <= self.y1)
             )
             if np.any(ok):
                 t_hit[ok] = cand[ok]
@@ -373,9 +370,7 @@ class CilindroY(Primitiva):
             px = O[:, 0] + tc * D[:, 0] - self.cx
             pz = O[:, 2] + tc * D[:, 2] - self.cz
             ok_c = (
-                dy_ok
-                & (tc > 1e-4)
-                & (tc < t_hit)
+                dy_ok & (tc > 1e-4) & (tc < t_hit)
                 & (px * px + pz * pz <= self.r * self.r)
             )
             if np.any(ok_c):
@@ -434,13 +429,9 @@ class ArcoBloco734(Primitiva):
             py = O[:, 1] + cand * D[:, 1]
             pz = O[:, 2] + cand * D[:, 2]
             ok = (
-                valid
-                & (cand > 1e-4)
-                & (cand < t_hit)
-                & (py >= self.y0)
-                & (py <= self.y1)
-                & (px <= self.cx + 0.05)
-                & (pz <= self.cz + 0.05)
+                valid & (cand > 1e-4) & (cand < t_hit)
+                & (py >= self.y0) & (py <= self.y1)
+                & (px <= self.cx + 0.05) & (pz <= self.cz + 0.05)
             )
             if np.any(ok):
                 t_hit[ok] = cand[ok]
@@ -454,12 +445,9 @@ class ArcoBloco734(Primitiva):
         pz = O[:, 2] + tc * D[:, 2]
         r2 = (px - self.cx) ** 2 + (pz - self.cz) ** 2
         ok_teto = (
-            dy_ok
-            & (tc > 1e-4)
-            & (tc < t_hit)
+            dy_ok & (tc > 1e-4) & (tc < t_hit)
             & (r2 <= self.r * self.r)
-            & (px <= self.cx + 0.05)
-            & (pz <= self.cz + 0.05)
+            & (px <= self.cx + 0.05) & (pz <= self.cz + 0.05)
         )
         if np.any(ok_teto):
             t_hit[ok_teto] = tc[ok_teto]
@@ -514,11 +502,8 @@ class ConeY(Primitiva):
         for cand in [(-b - sqrt_d) * inv_2a, (-b + sqrt_d) * inv_2a]:
             py = O[:, 1] + cand * D[:, 1]
             ok = (
-                valid
-                & (cand > 1e-4)
-                & (cand < t_hit)
-                & (py >= self.y0)
-                & (py <= self.y1)
+                valid & (cand > 1e-4) & (cand < t_hit)
+                & (py >= self.y0) & (py <= self.y1)
             )
             if np.any(ok):
                 t_hit[ok] = cand[ok]
@@ -537,9 +522,7 @@ class ConeY(Primitiva):
         px = O[:, 0] + tc * D[:, 0] - self.cx
         pz = O[:, 2] + tc * D[:, 2] - self.cz
         ok_b = (
-            dy_ok
-            & (tc > 1e-4)
-            & (tc < t_hit)
+            dy_ok & (tc > 1e-4) & (tc < t_hit)
             & (px * px + pz * pz <= self.r * self.r)
         )
         if np.any(ok_b):
@@ -570,7 +553,9 @@ class MalhaTriangulos(Primitiva):
         e2 = self.tris[:, 2] - self.tris[:, 0]
         fn = np.cross(e1, e2)
         norms = np.linalg.norm(fn, axis=1, keepdims=True)
-        self.normals = np.where(norms > 1e-9, fn / norms, np.array([0.0, 1.0, 0.0]))
+        self.normals = np.where(
+            norms > 1e-9, fn / norms, np.array([0.0, 1.0, 0.0])
+        )
 
         all_v = self.tris.reshape(-1, 3)
         self.bmin = np.min(all_v, axis=0) - 0.05
@@ -650,7 +635,7 @@ def gerar_caixa_triangulos(w, h, d, M):
 # RENDERIZADOR PRINCIPAL — BLOCO 734 (CT/UFC)
 # ==============================================================================
 class RenderizadorCT:
-    # Constantes do arco (usadas no mapeamento UV da placa 734)
+    # Constantes do arco (usadas também no mapeamento UV da placa 734)
     ARCO_CX = 37.0
     ARCO_CZ = 42.0
     ARCO_RAIO_PLACA = 22.08
@@ -668,7 +653,7 @@ class RenderizadorCT:
         self.presets = self._definir_presets()
         self.pick_buffer = None
 
-        # Cache das posições 3D da placa para o _avaliar_textura
+        # Posições 3D da placa para o mapeamento UV
         self._placa_z_ini = (
             self.ARCO_CZ
             - self.ARCO_RAIO_PLACA * math.sin(self.ARCO_ANG_PLACA)
@@ -690,4 +675,6 @@ class RenderizadorCT:
                 kd=(0.68, 0.67, 0.64), ke=(0.15, 0.15, 0.15),
                 shininess=10.0, textura="calcada",
             ),
-           
+            "alvenaria": Material(
+                "Alvenaria Branca Bloco 734",
+                kd=(0.93, 0.94
