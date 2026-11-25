@@ -166,8 +166,8 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     background: #0b1120; border-radius: 12px; overflow: hidden;
     border: 1px solid #1e293b;
   }
-  @media (max-width: 900px) {
-    #game-wrapper { height: 560px; }
+  @media (max-width: 900px), (pointer: coarse), (any-pointer: coarse) {
+      #xbox-sticks { display: block !important; }
   }
   }
   #game-wrapper.pseudo-fullscreen {
