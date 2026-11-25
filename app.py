@@ -517,7 +517,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   <!-- BOTÕES DE AÇÃO INFERIORES DIREITOS -->
   <div id="hud-bottom-right">
     <button class="action-btn photo" id="btn-photo">📸 Foto [P]</button>
-    <button class="action-btn creto" id="btn-creto">🎓 Prof. Creto [G]</button>
+    <button class="action-btn creto" id="btn-creto">🎓 Falar com Creto [E]</button>
     <button class="action-btn dance" id="btn-dance">💃 Dançar [C]</button>
     <button class="action-btn climb" id="btn-climb">🧗 Escalar [R]</button>
     <button class="action-btn ar" id="btn-interact">🔍 Interagir [E]</button>
@@ -627,7 +627,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
              • <b>[E] Interagir:</b> Coleta itens das mesas, fala com <b>Prof. Creto</b> (placa flutuante na praça), toma café na ilha (X=35.8, Z=18.8), aciona Totens 3D ou inspeciona monumentos.<br/>
              • <b>[R] Escalar Árvore/Poste:</b> Sobe em árvores ou postes de iluminação (equilibre com <b>A/D</b> e solte com <b>R</b> ou <b>Espaço</b>).<br/>
              • <b>[P] Modo Foto:</b> Abre o visor e registra fotos técnicas (Painéis Solares, Pássaro CT, Escultura, etc.).<br/>
-             • <b>[G] Quiz Prof. Creto:</b> Inicia o quiz de 4 perguntas sobre Computação Gráfica.<br/>
+             • <b>Falar com Prof. Creto:</b> Vá até o personagem Prof. Creto na praça (X=31.5, Z=23.5) e pressione <b>[E]</b> ou clique nele para abrir o quiz.<br/>
              • <b>[F] Atacar:</b> Quebra as janelas curvas do Bloco 734.<br/>
              • <b>[C] Comemorar:</b> Executa dança comemorativa.<br/>
              • <b>[Q] Inventário & Quests:</b> Pausa o jogo e exibe progresso.</p>
@@ -1258,24 +1258,46 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   criarAvatarRoblox(18.6, 0.2, 18.8, -35, 0x2563eb, 0xfacc15, 0x1e293b, 0.95);
   criarAvatarRoblox(19.6, 0.2, 18.2, -55, 0xea580c, 0xfacc15, 0x1e293b, 0.92);
 
-  // Personagem do Prof. Creto em destaque na Praça (X=31.5, Z=23.5) com Placa Flutuante!
+  // Personagem do Prof. Creto em destaque na Praça (X=31.5, Z=23.5) com Placa Flutuante, Farol & Clique Direto!
   const cretoPos = new THREE.Vector3(31.5, 0.2, 23.5);
-  const profCreto = criarAvatarRoblox(cretoPos.x, cretoPos.y, cretoPos.z, 180, 0xf8fafc, 0xfed7aa, 0x1e3a8a, 1.08);
+  const profCreto = criarAvatarRoblox(cretoPos.x, cretoPos.y, cretoPos.z, 180, 0xf8fafc, 0xfed7aa, 0x1e3a8a, 1.12);
   const oculos = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.11, 0.08), matEsquadria);
   oculos.position.set(0, 1.88, 0.25);
   profCreto.grp.add(oculos);
 
+  const cretoBeacon = new THREE.Mesh(
+    new THREE.ConeGeometry(0.26, 0.52, 6),
+    new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+  );
+  cretoBeacon.rotation.x = Math.PI;
+  cretoBeacon.position.set(0, 2.52, 0);
+  profCreto.grp.add(cretoBeacon);
+
   const cretoAro = new THREE.Mesh(
-    new THREE.TorusGeometry(0.85, 0.06, 8, 32),
+    new THREE.TorusGeometry(1.05, 0.08, 8, 32),
     new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
   );
   cretoAro.rotation.x = Math.PI / 2;
-  cretoAro.position.set(cretoPos.x, 0.24, cretoPos.z);
+  cretoAro.position.set(cretoPos.x, 0.25, cretoPos.z);
   scene.add(cretoAro);
 
-  const placaCreto = criarPlacaFlutuante("🎓 PROF. CRETO • QUIZ CG [E]/[G]", "#1e3a8a", "#60a5fa", 3.9, 0.78);
-  placaCreto.position.set(cretoPos.x, 2.95, cretoPos.z);
+  const placaCreto = criarPlacaFlutuante("🎓 PROF. CRETO • INTERAGIR [E]", "#1e3a8a", "#60a5fa", 4.1, 0.82);
+  placaCreto.position.set(cretoPos.x, 3.15, cretoPos.z);
   scene.add(placaCreto);
+
+  const cretoTotemAction = { id: "prof_creto_npc", titulo: "Prof. Creto — Quiz de CG", x: cretoPos.x, z: cretoPos.z, acaoFn: abrirQuizCreto };
+  [profCreto.torso, profCreto.cab, cretoBeacon].forEach((m) => {
+    m.userData.totem = cretoTotemAction;
+    clickableTotems.push(m);
+  });
+  registrarAR(
+    "Prof. Creto (Praça do Bloco 734)",
+    "NPC QUALIFICADO • INTERAÇÃO [E] OU CLIQUE",
+    "Professor de Computação Gráfica na praça (X=31.5, Z=23.5). Aproxime-se e pressione [E] ou clique nele para iniciar o quiz!",
+    "Avatar Articulado + Marcador 3D • [E] Falar & Quiz",
+    [cretoPos.x, 1.2, cretoPos.z], [1.6, 2.6, 1.6],
+    { totem: cretoTotemAction }
+  );
 
   // Vigilantes Patrimoniais
   const vigilantes = [
@@ -1918,7 +1940,15 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     }, 1600);
   }
 
-  document.getElementById('btn-creto').addEventListener('click', abrirQuizCreto);
+  document.getElementById('btn-creto').addEventListener('click', () => {
+    const distCreto = Math.hypot(pState.pos.x - cretoPos.x, pState.pos.z - cretoPos.z);
+    if (distCreto <= 4.2 && pState.pos.y < 2.2) {
+      abrirQuizCreto();
+    } else {
+      mostrarAlerta("🎓 Aproxime-se do Prof. Creto na praça (X=31.5, Z=23.5) e pressione [E] para falar com ele!", "alert-info", 2500, "info");
+    }
+    canvas.focus();
+  });
   document.getElementById('btn-close-creto').addEventListener('click', fecharModalCreto);
 
   // Cutscenes (Dança e Café)
@@ -2085,7 +2115,12 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       if (!visorFotoAtivo) alternarVisorFoto();
       else tirarFoto();
     } else if (k === 'g') {
-      abrirQuizCreto();
+      const distCreto = Math.hypot(pState.pos.x - cretoPos.x, pState.pos.z - cretoPos.z);
+      if (distCreto <= 4.2 && pState.pos.y < 2.2) {
+        abrirQuizCreto();
+      } else {
+        mostrarAlerta("🎓 Vá até o Prof. Creto na praça (X=31.5, Z=23.5) e pressione [E] para interagir!", "alert-info", 2500, "info");
+      }
     } else if (k === 'c') {
       iniciarCutsceneDanca("💃 Comemorando no Bloco 734!");
     }
@@ -2207,7 +2242,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       }
     }
     // 2. Prof. Creto (Praça X=31.5, Z=23.5)
-    if (Math.hypot(pState.pos.x - cretoPos.x, pState.pos.z - cretoPos.z) < 3.0 && pState.pos.y < 1.8) {
+    if (Math.hypot(pState.pos.x - cretoPos.x, pState.pos.z - cretoPos.z) < 4.2 && pState.pos.y < 2.2) {
       return { tipo: 'creto' };
     }
     // 3. Cafeteira
@@ -2358,8 +2393,10 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
 
     // Pulsar balizador IoT + Aro do Prof. Creto + Água + Coletáveis
     iotBeacon.scale.setScalar(1.0 + 0.25 * Math.sin(elapsed * 8.0));
-    cretoAro.scale.setScalar(1.0 + 0.1 * Math.sin(elapsed * 4.0));
-    placaCreto.position.y = 2.95 + Math.sin(elapsed * 2.5) * 0.08;
+    cretoAro.scale.setScalar(1.0 + 0.12 * Math.sin(elapsed * 4.0));
+    cretoBeacon.position.y = 2.52 + Math.sin(elapsed * 3.5) * 0.10;
+    cretoBeacon.rotation.y += dt * 1.8;
+    placaCreto.position.y = 3.15 + Math.sin(elapsed * 2.5) * 0.08;
     aguaMesh.position.y = 0.38 + Math.sin(elapsed * 2.8) * 0.015;
     collectibles.forEach((c, idx) => {
       if (!c.coletado) {
@@ -2759,7 +2796,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       if (proxE.tipo === 'collectible') {
         promptEl.textContent = `🎒 [E] Coletar "${proxE.item.nome}" para o Inventário`;
       } else if (proxE.tipo === 'creto') {
-        promptEl.textContent = `🎓 [E] ou [G] Falar com Prof. Creto (Quiz de Computação Gráfica)`;
+        promptEl.textContent = `🎓 [E] Falar com Prof. Creto e iniciar o Quiz`;
       } else if (proxE.tipo === 'coffee') {
         promptEl.textContent = `☕ [E] Tomar Cafezinho Expresso (Recuperar 100% Life)`;
       } else if (proxE.tipo === 'totem') {
