@@ -299,12 +299,15 @@ def calcular_caustica_fonte(P_world, N_world, fonte_info, modo_noite):
 # ==============================================================================
 class Primitiva:
 
-  def __init__(self, nome, tipo, matriz_M, material, dados_extra=None):
+  def __init__(
+      self, nome, tipo, matriz_M, material, dados_extra=None, eh_obj=False
+  ):
     self.nome = nome
     self.tipo = tipo
     self.M = matriz_M
     self.mat = material
     self.dados = dados_extra or {}
+    self.eh_obj = eh_obj
     self.M_total = self.M.copy()
     self.M_inv = None
     self.M_inv_T = None
@@ -406,7 +409,7 @@ def criar_malha_cobertura_metalica(M_inst):
   return {'vertices_world': v_world, 'faces': faces}
 
 
-def carregar_malha_obj(caminho_obj, M_inst, max_faces=1800):
+def carregar_malha_obj(caminho_obj, M_inst, max_faces=1200):
   caminho_completo = os.path.join(
       os.path.dirname(os.path.abspath(__file__)), caminho_obj
   )
@@ -780,18 +783,30 @@ def intersect_primitiva(O_cam, D_cam, prim, t_atual_min=np.inf):
     t_best = np.full(shape, np.inf)
     N_best = np.zeros_like(D_cam)
 
+    # Filtra apenas os raios que realmente atravessam a Bounding Box da malha
+    mask_box = testar_aabb(
+        O_cam, D_cam, prim.aabb_cam[0], prim.aabb_cam[1], t_atual_min
+    )
+    if not np.any(mask_box):
+      return t_best, N_best, np.zeros_like(D_cam), np.zeros(shape, dtype=int), N_best
+
+    O_sub = O_cam[mask_box]
+    D_sub = D_cam[mask_box]
+    t_sub = np.full(O_sub.shape[:-1], np.inf)
+    N_sub = np.zeros_like(D_sub)
+
     for f in faces:
       v0, v1, v2 = verts[f[0]], verts[f[1]], verts[f[2]]
       e1 = v1 - v0
       e2 = v2 - v0
-      h = np.cross(D_cam, e2)
+      h = np.cross(D_sub, e2)
       a = np.einsum('...i,i->...', h, e1)
       mask_a = np.abs(a) > 1e-7
       inv_a = 1.0 / np.where(mask_a, a, 1.0)
-      s = O_cam - v0
+      s = O_sub - v0
       u = inv_a * np.einsum('...i,...i->...', s, h)
       q = np.cross(s, e1)
-      v = inv_a * np.einsum('...i,...i->...', D_cam, q)
+      v = inv_a * np.einsum('...i,...i->...', D_sub, q)
       t = inv_a * np.einsum('...i,i->...', q, e2)
 
       hit_f = (
@@ -800,15 +815,18 @@ def intersect_primitiva(O_cam, D_cam, prim, t_atual_min=np.inf):
           & (v >= 0.0)
           & (u + v <= 1.0)
           & (t > 1e-4)
-          & (t < t_best)
+          & (t < t_sub)
       )
       if np.any(hit_f):
-        t_best = np.where(hit_f, t, t_best)
+        t_sub = np.where(hit_f, t, t_sub)
         nf = np.cross(e1, e2)
         nlen_f = np.linalg.norm(nf)
         if nlen_f > 1e-12:
           nf /= nlen_f
-        N_best = np.where(hit_f[..., None], nf, N_best)
+        N_sub = np.where(hit_f[..., None], nf, N_sub)
+
+    t_best[mask_box] = t_sub
+    N_best[mask_box] = N_sub
 
     M_inv = prim.M_inv
     P_w = (
@@ -1271,6 +1289,7 @@ def montar_cenario():
           M_malha,
           mat_metal_galv,
           dados_extra=dados_m,
+          eh_obj=False,
       )
   )
 
@@ -1352,6 +1371,7 @@ def montar_cenario():
           M_suv,
           mat_suv,
           dados_extra=carregar_malha_obj('SUV.obj', M_suv),
+          eh_obj=True,
       )
   )
 
@@ -1367,6 +1387,7 @@ def montar_cenario():
           M_sport,
           mat_esportivo,
           dados_extra=carregar_malha_obj('SportsCar.obj', M_sport),
+          eh_obj=True,
       )
   )
 
@@ -1382,6 +1403,7 @@ def montar_cenario():
           M_p1,
           mat_estudante1,
           dados_extra=carregar_malha_obj('Female_Casual.obj', M_p1),
+          eh_obj=True,
       )
   )
 
@@ -1397,6 +1419,7 @@ def montar_cenario():
           M_p2,
           mat_estudante2,
           dados_extra=carregar_malha_obj('Female_Dress.obj', M_p2),
+          eh_obj=True,
       )
   )
 
@@ -1408,6 +1431,7 @@ def montar_cenario():
           M_palm,
           mat_palmeira,
           dados_extra=carregar_malha_obj('PalmTree_2.obj', M_palm),
+          eh_obj=True,
       )
   )
 
@@ -1421,7 +1445,7 @@ def montar_cenario():
 
 
 # ==============================================================================
-# 7. MOTOR DE RENDERIZAÇÃO (DIA/NOITE + CÁUSTICA + BOUNDING BOX AABB)
+# 7. MOTOR DE RENDERIZAÇÃO (COM OPÇÕES DE OTIMIZAÇÃO EM TEMPO REAL)
 # ==============================================================================
 class RenderizadorCT:
 
@@ -1431,9 +1455,6 @@ class RenderizadorCT:
     self.cena, self.materiais_bloco, self.dados_escultura, self.extras_3d = (
         montar_cenario()
     )
-
-    self.centro_domo = np.array([35.0, 2.5, 34.0], dtype=np.float64)
-    self.raio_domo = 38.0
 
     self.presets = {
         '2_pontos_fuga': {
@@ -1504,13 +1525,17 @@ class RenderizadorCT:
     }
     self.ultimo_buffer_pick = None
 
-  def _aabb_global_cena(self):
-    valid_aabbs = [p.aabb_cam for p in self.cena if p.aabb_cam is not None]
+  def _aabb_global_cena(self, incluir_objs=True):
+    valid_aabbs = [
+        p.aabb_cam
+        for p in self.cena
+        if p.aabb_cam is not None and (incluir_objs or not p.eh_obj)
+    ]
     mins = np.min([a[0] for a in valid_aabbs], axis=0)
     maxs = np.max([a[1] for a in valid_aabbs], axis=0)
     return mins, maxs
 
-  def tracar_raios(self, O_cam, D_cam):
+  def tracar_raios(self, O_cam, D_cam, incluir_objs=True):
     shape = D_cam.shape[:-1]
     t_min = np.full(shape, np.inf)
     N_min = np.zeros_like(D_cam)
@@ -1519,11 +1544,13 @@ class RenderizadorCT:
     obj_idx = np.full(shape, -1, dtype=int)
     sub_mat_min = np.zeros(shape, dtype=int)
 
-    g_min, g_max = self._aabb_global_cena()
+    g_min, g_max = self._aabb_global_cena(incluir_objs=incluir_objs)
     if not np.any(testar_aabb(O_cam, D_cam, g_min, g_max)):
       return t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min
 
     for idx, prim in enumerate(self.cena):
+      if prim.eh_obj and not incluir_objs:
+        continue
       t_o, N_o, P_w, sub_m, N_w = intersect_primitiva(
           O_cam, D_cam, prim, t_min
       )
@@ -1551,6 +1578,9 @@ class RenderizadorCT:
       luzes,
       modo_noite=False,
       permitir_reflexo=True,
+      ativar_sombras=True,
+      ativar_caustics=True,
+      incluir_objs=True,
   ):
     shape = D_cam.shape[:-1]
     hit = np.isfinite(t_min)
@@ -1608,10 +1638,13 @@ class RenderizadorCT:
     if not modo_noite:
       L_dir = -luzes['dir_cam']
       sombra_dir = np.zeros(shape, dtype=bool)
-      D_dir_bcast = np.broadcast_to(L_dir, D_cam.shape)
-      for prim in self.cena[2:]:
-        ts, _, _, _, _ = intersect_primitiva(P_eps, D_dir_bcast, prim)
-        sombra_dir |= hit & np.isfinite(ts)
+      if ativar_sombras:
+        D_dir_bcast = np.broadcast_to(L_dir, D_cam.shape)
+        for prim in self.cena[2:]:
+          if prim.eh_obj:
+            continue  # Sombra apenas das primitivas analíticas principais (10x mais rápido)
+          ts, _, _, _, _ = intersect_primitiva(P_eps, D_dir_bcast, prim)
+          sombra_dir |= hit & np.isfinite(ts)
       ndl_d = np.maximum(0.0, np.einsum('...i,i->...', N_min, L_dir))
       R_d = 2.0 * ndl_d[..., None] * N_min - L_dir
       rdv_d = np.maximum(0.0, np.einsum('...i,...i->...', R_d, V_cam))
@@ -1650,10 +1683,11 @@ class RenderizadorCT:
         Kd * luzes['I_spot'] * ndl_s[..., None]
     )
 
-    cor_caustica = calcular_caustica_fonte(
-        P_w_min, N_w_min, self.extras_3d['fonte'], modo_noite
-    )
-    cor += cor_caustica
+    if ativar_caustics:
+      cor_caustica = calcular_caustica_fonte(
+          P_w_min, N_w_min, self.extras_3d['fonte'], modo_noite
+      )
+      cor += cor_caustica
 
     if permitir_reflexo and np.any(refl > 0.01):
       D_refl = (
@@ -1661,7 +1695,9 @@ class RenderizadorCT:
           - 2.0 * np.einsum('...i,...i->...', D_cam, N_min)[..., None] * N_min
       )
       D_refl /= np.linalg.norm(D_refl, axis=-1, keepdims=True)
-      t_r, N_r, P_wr, idx_r, sub_r, Nw_r = self.tracar_raios(P_eps, D_refl)
+      t_r, N_r, P_wr, idx_r, sub_r, Nw_r = self.tracar_raios(
+          P_eps, D_refl, incluir_objs=incluir_objs
+      )
       cor_r = self.sombrear(
           P_eps,
           D_refl,
@@ -1674,6 +1710,9 @@ class RenderizadorCT:
           luzes,
           modo_noite=modo_noite,
           permitir_reflexo=False,
+          ativar_sombras=False,
+          ativar_caustics=ativar_caustics,
+          incluir_objs=incluir_objs,
       )
       cor = (1.0 - refl[..., None]) * cor + refl[..., None] * cor_r
 
@@ -1689,11 +1728,21 @@ class RenderizadorCT:
 
     return np.where(hit[..., None], np.clip(cor, 0.0, 1.0), ceu)
 
-  def renderizar_config(self, cfg, modo_noite=False):
+  def renderizar_config(
+      self,
+      cfg,
+      modo_noite=False,
+      ativar_caustics=True,
+      ativar_reflexos=True,
+      ativar_sombras=True,
+      incluir_objs=True,
+  ):
     t0 = time.time()
     M_wc = construir_Mwc(cfg['eye'], cfg['at'], cfg['up'])
 
     for prim in self.cena:
+      if prim.eh_obj and not incluir_objs:
+        continue
       prim.preparar_camera(M_wc)
 
     dir_w = np.array([0.45, -0.75, 0.48, 0.0])
@@ -1761,7 +1810,7 @@ class RenderizadorCT:
       D_cam = np.broadcast_to(d_vec, O_cam.shape).copy()
 
     t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min = self.tracar_raios(
-        O_cam, D_cam
+        O_cam, D_cam, incluir_objs=incluir_objs
     )
     img = self.sombrear(
         O_cam,
@@ -1774,17 +1823,11 @@ class RenderizadorCT:
         N_w_min,
         luzes,
         modo_noite=modo_noite,
+        permitir_reflexo=ativar_reflexos,
+        ativar_sombras=ativar_sombras,
+        ativar_caustics=ativar_caustics,
+        incluir_objs=incluir_objs,
     )
 
-    self.ultimo_buffer_pick = {
-        'obj_idx': obj_idx,
-        'sub_mat': sub_mat_min,
-        'P_world': P_w_min,
-        't_min': t_min,
-    }
-    turno_txt = (
-        'NOITE (Luz Artificial + Cáusticas)'
-        if modo_noite
-        else 'DIA (Sol + Cáusticas Suaves)'
-    )
+    turno_txt = 'NOITE' if modo_noite else 'DIA'
     return img, f"{cfg['titulo']} [{turno_txt}] ({time.time() - t0:.2f}s)"
