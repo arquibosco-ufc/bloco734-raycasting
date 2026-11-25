@@ -522,9 +522,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     <button class="action-btn" id="btn-iso" title="Projeção Isométrica">🧊 Isométrica</button>
   </div>
 
-  
-  </div>
-
   <div id="xbox-sticks" style="position:absolute;inset:0;pointer-events:none;z-index:25;display:none;touch-action:none;">
     <div id="stick-walk" style="position:absolute;left:20px;bottom:68px;width:116px;height:116px;border-radius:50%;background:rgba(15,23,42,0.55);border:2px solid rgba(56,189,248,0.65);pointer-events:auto;touch-action:none;">
       <div class="knob" style="position:relative;left:35px;top:35px;width:42px;height:42px;border-radius:50%;background:rgba(56,189,248,0.9);box-shadow:0 4px 12px rgba(0,0,0,0.45);"></div>
