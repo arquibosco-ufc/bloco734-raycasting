@@ -1250,9 +1250,7 @@ def montar_cenario():
     )
 
   # --- ESCADA EXTERNA DE ACESSO AO TELHADO ---
-  M_escada = (
-      mat_translacao(59.35, 3.4, 24.0) @ mat_escala(0.55, 6.6, 1.1)
-  )
+  M_escada = mat_translacao(59.35, 3.4, 24.0) @ mat_escala(0.55, 6.6, 1.1)
   cena.append(
       Primitiva('Escada Acesso Telhado', 'cubo', M_escada, mat_esquadria)
   )
@@ -1260,7 +1258,7 @@ def montar_cenario():
   # --- ÁRVORES NO ENTORNO ---
   arvores_cfg = [
       ('Árvore Bosque Esq.', 10.5, 28.5, 1.15),
-      ('Árvore Fundo Esq.', 11.5, 38.0, 1.25),
+      ('Árvore Ninho Ave (Fundo Esq.)', 11.5, 38.0, 1.25),
       ('Árvore Praça Dir.', 37.5, 17.5, 0.90),
   ]
   esferas_copa_rel = [
@@ -1495,7 +1493,7 @@ def montar_cenario():
 
 
 # ==============================================================================
-# 7. MOTOR DE RENDERIZAÇÃO COM SUPERSAMPLING 2x2 (NITIDEZ MÁXIMA)
+# 7. MOTOR DE RENDERIZAÇÃO COM SUPERSAMPLING 2x2 E BUFFERS DE PICKING
 # ==============================================================================
 class RenderizadorCT:
 
@@ -1841,8 +1839,11 @@ class RenderizadorCT:
     xmin, xmax, ymin, ymax = cfg['win']
     d = cfg['d']
 
-    # Supersampling real 2x2 (4 sub-raios por pixel)
-    offsets = [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)] if ssaa else [(0.0, 0.0)]
+    offsets = (
+        [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)]
+        if ssaa
+        else [(0.0, 0.0)]
+    )
     du = (xmax - xmin) / self.W
     dv = (ymin - ymax) / self.H
 
@@ -1850,7 +1851,9 @@ class RenderizadorCT:
     v_base = np.linspace(ymax + 0.5 * dv, ymin - 0.5 * dv, self.H)
 
     img_acum = np.zeros((self.H, self.W, 3), dtype=np.float64)
-    for ox, oy in offsets:
+    pick_buffers = {}
+
+    for idx_sub, (ox, oy) in enumerate(offsets):
       U, V = np.meshgrid(u_base + ox * du, v_base + oy * dv)
       if cfg['proj'] == 'perspectiva':
         O_cam = np.zeros((self.H, self.W, 3), dtype=np.float64)
@@ -1870,6 +1873,15 @@ class RenderizadorCT:
       t_min, N_min, P_w_min, obj_idx, sub_mat_min, N_w_min = self.tracar_raios(
           O_cam, D_cam, incluir_objs=incluir_objs
       )
+      if idx_sub == 0:
+        pick_buffers = {
+            't_min': t_min,
+            'P_w_min': P_w_min,
+            'N_w_min': N_w_min,
+            'obj_idx': obj_idx,
+            'sub_mat_min': sub_mat_min,
+        }
+
       img_sub = self.sombrear(
           O_cam,
           D_cam,
@@ -1889,8 +1901,11 @@ class RenderizadorCT:
       img_acum += img_sub
 
     img = np.clip(img_acum / len(offsets), 0.0, 1.0)
-    # Correção gama sRGB para nitidez e contraste naturais
     img = np.power(img, 1.0 / 1.12)
     turno_txt = 'NOITE' if modo_noite else 'DIA'
     aa_txt = ' | SSAA 4x' if ssaa else ''
-    return img, f"{cfg['titulo']} [{turno_txt}{aa_txt}] ({time.time() - t0:.2f}s)"
+    return (
+        img,
+        f"{cfg['titulo']} [{turno_txt}{aa_txt}] ({time.time() - t0:.2f}s)",
+        pick_buffers,
+    )
