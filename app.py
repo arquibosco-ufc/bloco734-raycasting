@@ -1,11 +1,25 @@
+import io
 import time
 import numpy as np
+from PIL import Image
 import streamlit as st
 import streamlit.components.v1 as components
-from motor_ct import RenderizadorCT
 
+from motor_ct import RenderizadorCT, construir_Mwc
+
+try:
+    from streamlit_image_coordinates import streamlit_image_coordinates
+
+    TEM_IMG_COORDS = True
+except ImportError:
+    TEM_IMG_COORDS = False
+
+
+# ==============================================================================
+# CONFIGURAÇÃO DA PÁGINA & ESTILO GLOBAL
+# ==============================================================================
 st.set_page_config(
-    page_title="Bloco 734 CT/UFC — Simulador 3D & Ray Casting",
+    page_title="Bloco 734 (CT/UFC) — Ray Casting & Simulador Interativo 3D",
     page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -13,8 +27,11 @@ st.set_page_config(
 
 st.markdown(
     """
-    <style>
-    .block-container { padding-top: 1.0rem; padding-bottom: 1.0rem; }
+<style>
+    .block-container {
+        padding-top: 1.0rem;
+        padding-bottom: 1.4rem;
+    }
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] {
         background-color: #111827;
@@ -27,1657 +44,1201 @@ st.markdown(
         background-color: #2563eb !important;
         color: #ffffff !important;
     }
-    </style>
-    """,
+    .pick-banner {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        border: 1px solid #38bdf8;
+        border-left: 5px solid #38bdf8;
+        border-radius: 10px;
+        padding: 12px 16px;
+        margin: 8px 0 12px 0;
+        color: #f8fafc;
+        box-shadow: 0 8px 24px rgba(2, 6, 23, 0.35);
+    }
+    .pick-banner-title {
+        font-size: 1.02rem;
+        font-weight: 700;
+        color: #38bdf8;
+        margin-bottom: 4px;
+    }
+    .pick-banner-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
+        gap: 6px 14px;
+        font-size: 0.85rem;
+        color: #cbd5e1;
+        margin-top: 6px;
+    }
+    .pick-banner-desc {
+        font-size: 0.86rem;
+        color: #e2e8f0;
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid rgba(148, 163, 184, 0.25);
+    }
+</style>
+""",
     unsafe_allow_html=True,
 )
 
 
-@st.cache_resource
-def obter_motor(largura: int, altura: int) -> RenderizadorCT:
-    return RenderizadorCT(largura=largura, altura=altura)
+# ==============================================================================
+# GERENCIAMENTO DE ESTADO DA SESSÃO
+# ==============================================================================
+if "resolucao" not in st.session_state:
+    st.session_state.resolucao = 500
+if "renderer" not in st.session_state or (
+    st.session_state.renderer.W != st.session_state.resolucao
+):
+    st.session_state.renderer = RenderizadorCT(
+        largura=st.session_state.resolucao, altura=st.session_state.resolucao
+    )
+if "ultima_img_arr" not in st.session_state:
+    st.session_state.ultima_img_arr = None
+if "ultima_legenda" not in st.session_state:
+    st.session_state.ultima_legenda = ""
+if "ultimo_pick_info" not in st.session_state:
+    st.session_state.ultimo_pick_info = None
+if "ultima_coord_clicada" not in st.session_state:
+    st.session_state.ultima_coord_clicada = None
+
+
+def renderizar_banner_pick(info, px=None, py=None):
+    if not info:
+        return
+    if not info.get("hit", False):
+        st.markdown(
+            f"""
+            <div class="pick-banner" style="border-left-color:#94a3b8; border-color:#475569;">
+                <div class="pick-banner-title" style="color:#cbd5e1;">
+                    🎯 Pixel ({px}, {py}) — {info.get('nome', 'Céu / Horizonte')}
+                </div>
+                <div class="pick-banner-desc">{info.get('descricao', '')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    coord_txt = (
+        f"Pixel ({px}, {py}) • " if (px is not None and py is not None) else ""
+    )
+    st.markdown(
+        f"""
+        <div class="pick-banner">
+            <div class="pick-banner-title">
+                🎯 {coord_txt}{info['nome']} <span style="font-size:0.8rem; color:#94a3b8;">[{info['tipo_primitiva']}]</span>
+            </div>
+            <div class="pick-banner-grid">
+                <div><b>Grupo:</b> {info['grupo']}</div>
+                <div><b>Material:</b> {info['material']}</div>
+                <div><b>Distância (t):</b> {info['distancia']:.2f} m</div>
+                <div><b>Ponto 3D (Mundo):</b> {info['ponto_world']}</div>
+                <div><b>Normal N:</b> {info['normal_world']}</div>
+                <div><b>Kd / Refl:</b> {info['kd']} | R={info['refletividade']:.2f}</div>
+            </div>
+            <div class="pick-banner-desc">
+                <b>Transformação:</b> {info['transformacao']}<br/>
+                <b>Descrição:</b> {info['descricao']}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ==============================================================================
-# JOGO INTERATIVO 3D (THREE.JS + MINI-QUESTS + IOT + VIGILÂNCIA + QUIZ CRETO)
+# HTML / THREE.JS / WEB AUDIO — MODO WEBGL COMPLETO & UNIFICADO
 # ==============================================================================
-JOGO_3D_HTML = r"""
-<!DOCTYPE html>
+def gerar_html_jogo_webgl(
+    modo_noite=False, ativar_sol=True, ativar_spots=True
+):
+    template = r"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bloco 734 — Campus Interativo 3D</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-  body {
-    background: #090d16;
-    color: #f8fafc;
-    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    overflow: hidden;
-    width: 100vw;
-    height: 100vh;
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #0b1120; font-family: 'Segoe UI', system-ui, sans-serif;
   }
-  #canvas-container {
-    position: relative;
-    width: 100%;
-    height: 100%;
+  #game-wrapper {
+    position: relative; width: 100%; height: 730px;
+    background: #0b1120; border-radius: 12px; overflow: hidden;
+    border: 1px solid #1e293b;
+    outline: none;
   }
-  canvas { display: block; width: 100%; height: 100%; }
+  #game-wrapper.pseudo-fullscreen {
+    position: fixed !important; inset: 0 !important;
+    width: 100vw !important; height: 100vh !important;
+    z-index: 999999 !important; border-radius: 0 !important;
+  }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; outline: none; }
+  canvas:active { cursor: grabbing; }
 
-  /* HUD Superior */
-  #hud-top {
-    position: absolute;
-    top: 12px; left: 12px; right: 12px;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-    pointer-events: none;
-    z-index: 10;
+  /* HUD SUPERIOR ESQUERDO */
+  #hud-top-left {
+    position: absolute; top: 12px; left: 12px;
+    display: flex; flex-direction: column; gap: 6px;
+    z-index: 12; pointer-events: none;
   }
-  .hud-card {
+  .hud-pill {
     background: rgba(15, 23, 42, 0.84);
     backdrop-filter: blur(8px);
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    border-radius: 12px;
-    padding: 10px 14px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    border: 1px solid rgba(148, 163, 184, 0.30);
+    color: #f8fafc; padding: 6px 12px; border-radius: 999px;
+    font-size: 12px; font-weight: 600;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    width: fit-content; pointer-events: auto;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  }
+  .bar-bg {
+    width: 104px; height: 9px; background: rgba(30, 41, 59, 0.95);
+    border-radius: 999px; overflow: hidden; border: 1px solid rgba(255,255,255,0.14);
+  }
+  #energy-fill {
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, #22c55e, #38bdf8);
+    transition: width 0.18s, background 0.2s;
+  }
+
+  /* CHECKLIST COMPACTO DE MINI-QUESTS CT */
+  #mini-quest-box {
+    background: rgba(15, 23, 42, 0.82);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(56, 189, 248, 0.32);
+    border-radius: 10px; padding: 7px 11px;
+    font-size: 11.5px; line-height: 1.48;
+    color: #e2e8f0; width: fit-content; max-width: 310px;
     pointer-events: auto;
   }
-  .hp-bar-wrap {
-    width: 210px;
-    height: 14px;
-    background: #1e293b;
-    border-radius: 999px;
-    overflow: hidden;
-    margin-top: 6px;
-    border: 1px solid rgba(255,255,255,0.15);
+  .mq-done { color: #4ade80; text-decoration: line-through; opacity: 0.85; }
+  .mq-todo { color: #e2e8f0; }
+
+  /* HUD SUPERIOR DIREITO */
+  #hud-top-right {
+    position: absolute; top: 12px; right: 12px;
+    display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; z-index: 15;
   }
-  #hp-bar {
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, #22c55e, #4ade80);
-    transition: width 0.2s ease, background 0.2s ease;
+  .hud-btn {
+    background: rgba(15, 23, 42, 0.86);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    color: #f8fafc; padding: 7px 11px; border-radius: 8px;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: all 0.15s ease;
   }
-  .stats-row {
-    display: flex;
-    gap: 12px;
-    margin-top: 8px;
-    font-size: 12px;
-    color: #cbd5e1;
-  }
-  .badge {
-    background: rgba(30, 41, 59, 0.9);
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    padding: 3px 8px;
-    border-radius: 6px;
-    font-weight: 600;
+  .hud-btn:hover { background: rgba(30, 41, 59, 0.98); border-color: #38bdf8; transform: translateY(-1px); }
+  .hud-btn.surv-on {
+    background: rgba(127, 29, 29, 0.90);
+    border-color: #ef4444; color: #fecaca;
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.4);
   }
 
-  /* Painel de Mini-Quests */
-  #quest-list {
-    font-size: 12px;
-    line-height: 1.55;
-    max-width: 340px;
-  }
-  .q-done { color: #4ade80; text-decoration: line-through; opacity: 0.88; }
-  .q-todo { color: #e2e8f0; }
-
-  /* Alertas IoT e Patrimoniais */
+  /* PILHA DE ALERTAS DINÂMICOS (IoT, VIGILÂNCIA, CACHORRO, EVENTOS) */
   #alert-stack {
-    position: absolute;
-    top: 108px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    align-items: center;
-    z-index: 15;
-    pointer-events: none;
-    width: min(640px, 92vw);
+    position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; gap: 6px; align-items: center;
+    z-index: 24; pointer-events: none; width: min(600px, 88vw);
   }
   .alert-banner {
-    padding: 10px 18px;
-    border-radius: 10px;
-    font-weight: 700;
-    font-size: 13.5px;
-    text-align: center;
-    letter-spacing: 0.2px;
-    box-shadow: 0 8px 28px rgba(0,0,0,0.55);
-    animation: pulseAlert 0.85s infinite alternate;
+    padding: 8px 16px; border-radius: 9px; font-weight: 700; font-size: 12.5px;
+    text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   }
-  .alert-iot {
-    background: rgba(234, 88, 12, 0.94);
-    border: 2px solid #fed7aa;
-    color: #fff;
-  }
-  .alert-danger {
-    background: rgba(220, 38, 38, 0.95);
-    border: 2px solid #fecaca;
-    color: #fff;
-  }
-  .alert-info {
-    background: rgba(37, 99, 235, 0.92);
-    border: 2px solid #bfdbfe;
-    color: #fff;
-    animation: none;
-  }
-  .alert-success {
-    background: rgba(22, 163, 74, 0.94);
-    border: 2px solid #bbf7d0;
-    color: #fff;
-    animation: none;
-  }
-  @keyframes pulseAlert {
-    from { transform: scale(0.99); }
-    to { transform: scale(1.015); }
-  }
+  .alert-iot { background: rgba(234, 88, 12, 0.94); border: 1.5px solid #fed7aa; color: #fff; }
+  .alert-danger { background: rgba(220, 38, 38, 0.95); border: 1.5px solid #fecaca; color: #fff; }
+  .alert-info { background: rgba(37, 99, 235, 0.92); border: 1.5px solid #bfdbfe; color: #fff; }
+  .alert-success { background: rgba(22, 163, 74, 0.94); border: 1.5px solid #bbf7d0; color: #fff; }
 
-  /* Barra de Equilíbrio na Escalada */
+  /* BARRA DE EQUILÍBRIO NA ESCALADA */
   #climb-hud {
-    position: absolute;
-    bottom: 92px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(15, 23, 42, 0.9);
-    border: 1px solid #38bdf8;
-    border-radius: 12px;
-    padding: 10px 18px;
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    z-index: 16;
+    position: absolute; bottom: 118px; left: 50%; transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.92); border: 1px solid #38bdf8;
+    border-radius: 12px; padding: 9px 16px;
+    display: none; flex-direction: column; align-items: center; gap: 6px; z-index: 18;
   }
   .balance-track {
-    position: relative;
-    width: 240px;
-    height: 14px;
+    position: relative; width: 240px; height: 13px;
     background: linear-gradient(90deg, #ef4444 0%, #22c55e 35%, #22c55e 65%, #ef4444 100%);
-    border-radius: 999px;
-    border: 1px solid #fff;
+    border-radius: 999px; border: 1px solid #fff;
   }
   #balance-needle {
-    position: absolute;
-    top: -3px;
-    left: 50%;
-    width: 8px;
-    height: 20px;
-    background: #ffffff;
-    border-radius: 3px;
-    transform: translateX(-50%);
+    position: absolute; top: -3px; left: 50%; width: 8px; height: 19px;
+    background: #fff; border-radius: 3px; transform: translateX(-50%);
     box-shadow: 0 0 8px #000;
   }
 
-  /* Controles Inferiores */
-  #hud-bottom {
-    position: absolute;
-    bottom: 12px; left: 12px; right: 12px;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: 10px;
-    z-index: 12;
-    pointer-events: none;
+  /* PROMPT DE PROXIMIDADE */
+  #interact-prompt {
+    position: absolute; bottom: 68px; left: 50%; transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.90);
+    border: 1px solid #38bdf8; color: #f8fafc;
+    padding: 7px 16px; border-radius: 999px;
+    font-size: 12.5px; font-weight: 600;
+    display: none; z-index: 14; pointer-events: none;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.45);
   }
-  .btn-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px;
-    pointer-events: auto;
-  }
-  button.game-btn {
-    background: rgba(30, 41, 59, 0.92);
-    color: #f8fafc;
-    border: 1px solid rgba(148, 163, 184, 0.35);
-    border-radius: 8px;
-    padding: 7px 11px;
-    font-size: 12.5px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  button.game-btn:hover { background: #2563eb; border-color: #93c5fd; }
-  button.game-btn.active { background: #1d4ed8; border-color: #60a5fa; }
 
-  /* Visor Fotográfico & Flash */
+  /* BOTÕES INFERIORES */
+  #hud-bottom-left {
+    position: absolute; bottom: 12px; left: 12px;
+    display: flex; flex-wrap: wrap; gap: 6px; z-index: 14;
+  }
+  #hud-bottom-right {
+    position: absolute; bottom: 12px; right: 12px;
+    display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; z-index: 14;
+  }
+  .action-btn {
+    background: rgba(15, 23, 42, 0.88);
+    border: 1px solid rgba(148, 163, 184, 0.42);
+    color: #f8fafc; padding: 8px 10px; border-radius: 9px;
+    font-size: 11.5px; font-weight: 700; cursor: pointer;
+    transition: 0.15s;
+  }
+  .action-btn:hover { background: #1e293b; border-color: #38bdf8; }
+  .action-btn.ar { border-color: #38bdf8; color: #7dd3fc; }
+  .action-btn.atk { border-color: #f97316; color: #fdba74; }
+  .action-btn.dance { border-color: #ec4899; color: #f9a8d4; }
+  .action-btn.photo { border-color: #34d399; color: #6ee7b7; }
+  .action-btn.creto { border-color: #a78bfa; color: #ddd6fe; }
+
+  /* CARTÃO DE REALIDADE AUMENTADA */
+  #ar-card {
+    position: absolute; top: 64px; right: 14px; width: 315px;
+    background: rgba(9, 14, 28, 0.92);
+    backdrop-filter: blur(10px);
+    border: 1px solid #22d3ee; border-left: 4px solid #22d3ee;
+    border-radius: 10px; padding: 12px 14px; color: #e2e8f0;
+    display: none; z-index: 18;
+    box-shadow: 0 10px 30px rgba(34, 211, 238, 0.25);
+  }
+  #ar-card h4 { color: #22d3ee; font-size: 14px; margin-bottom: 4px; }
+  #ar-card .ar-tag {
+    display: inline-block; font-size: 10.5px; padding: 2px 7px;
+    background: rgba(34, 211, 238, 0.16); color: #67e8f9;
+    border-radius: 4px; margin-bottom: 6px; font-weight: 600;
+  }
+  #ar-card p { font-size: 12px; line-height: 1.45; color: #cbd5e1; margin-bottom: 6px; }
+  #ar-card .ar-meta {
+    font-size: 11px; color: #94a3b8;
+    border-top: 1px solid rgba(148,163,184,0.2); padding-top: 6px;
+  }
+
+  /* VISOR FOTOGRÁFICO & FLASH */
   #photo-overlay {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    display: none;
-    z-index: 25;
+    position: absolute; inset: 0; pointer-events: none; display: none; z-index: 25;
   }
   .viewfinder-box {
-    position: absolute;
-    inset: 38px;
-    border: 2px dashed rgba(255,255,255,0.75);
-    border-radius: 14px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    padding: 16px;
+    position: absolute; inset: 46px; border: 2px dashed rgba(255,255,255,0.78);
+    border-radius: 14px; display: flex; flex-direction: column;
+    justify-content: space-between; padding: 14px;
   }
   #flash-screen {
-    position: absolute;
-    inset: 0;
-    background: #ffffff;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.35s ease-out;
-    z-index: 30;
+    position: absolute; inset: 0; background: #fff; opacity: 0;
+    pointer-events: none; transition: opacity 0.3s ease-out; z-index: 28;
   }
 
-  /* Cutscene Jumpscare */
+  /* FLASH DE DANO & JUMPSCARE */
+  #damage-flash {
+    position: absolute; inset: 0; pointer-events: none; z-index: 22;
+    background: radial-gradient(circle, transparent 45%, rgba(220, 38, 38, 0.65) 100%);
+    opacity: 0; transition: opacity 0.22s ease;
+  }
   #jumpscare-overlay {
-    position: absolute;
-    inset: 0;
+    position: absolute; inset: 0;
     background: radial-gradient(circle, #450a0a 0%, #000000 85%);
-    display: none;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    z-index: 50;
+    display: none; flex-direction: column; justify-content: center;
+    align-items: center; z-index: 50;
     animation: shakeScreen 0.1s infinite;
   }
   @keyframes shakeScreen {
     0% { transform: translate(0, 0) rotate(0deg); }
-    25% { transform: translate(-10px, 8px) rotate(-1.5deg); }
-    50% { transform: translate(10px, -8px) rotate(1.5deg); }
-    75% { transform: translate(-8px, -6px) rotate(-1deg); }
-    100% { transform: translate(8px, 6px) rotate(1deg); }
+    25% { transform: translate(-8px, 6px) rotate(-1.2deg); }
+    50% { transform: translate(8px, -6px) rotate(1.2deg); }
+    75% { transform: translate(-6px, -5px) rotate(-0.8deg); }
+    100% { transform: translate(6px, 5px) rotate(0.8deg); }
   }
 
-  /* Modal Quiz Prof. Creto */
-  #creto-modal {
-    position: absolute;
-    inset: 0;
-    background: rgba(2, 6, 23, 0.78);
-    backdrop-filter: blur(6px);
-    display: none;
-    justify-content: center;
-    align-items: center;
-    z-index: 40;
+  /* LETTERBOX CUTSCENE */
+  .letterbox {
+    position: absolute; left: 0; width: 100%; height: 0;
+    background: #020617; z-index: 30; transition: height 0.4s ease;
   }
-  .modal-card {
-    background: #0f172a;
-    border: 2px solid #3b82f6;
-    border-radius: 16px;
-    padding: 22px 26px;
-    width: min(560px, 92vw);
+  #lb-top { top: 0; }
+  #lb-bottom { bottom: 0; }
+  #cutscene-caption {
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    color: #fef3c7; font-size: 14.5px; font-weight: 700;
+    text-shadow: 0 2px 10px #000; z-index: 31; display: none;
+    text-align: center; width: 88%;
+  }
+
+  /* MODAL QUIZ PROF. CRETO */
+  #creto-modal {
+    position: absolute; inset: 0; background: rgba(2, 6, 23, 0.80);
+    backdrop-filter: blur(6px); display: none; justify-content: center;
+    align-items: center; z-index: 42; padding: 16px;
+  }
+  .creto-card {
+    background: #0f172a; border: 2px solid #3b82f6; border-radius: 16px;
+    padding: 20px 24px; width: min(560px, 94vw); color: #f8fafc;
     box-shadow: 0 20px 50px rgba(0,0,0,0.75);
   }
   .quiz-opt {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: #1e293b;
-    color: #f8fafc;
-    border: 1px solid #475569;
-    border-radius: 10px;
-    padding: 11px 14px;
-    margin-top: 9px;
-    font-size: 13.5px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
+    display: block; width: 100%; text-align: left;
+    background: #1e293b; color: #f8fafc; border: 1px solid #475569;
+    border-radius: 10px; padding: 10px 14px; margin-top: 8px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
   }
   .quiz-opt:hover { background: #2563eb; border-color: #93c5fd; }
+
+  /* TELA GAME OVER (MODO SOBREVIVÊNCIA) */
+  #gameover-modal {
+    position: absolute; inset: 0; background: rgba(69, 10, 10, 0.90);
+    backdrop-filter: blur(8px); display: none; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 45;
+    color: #fef2f2; text-align: center; padding: 24px;
+  }
+  #gameover-modal h2 { font-size: 30px; color: #fca5a5; margin-bottom: 8px; }
+  #gameover-reason { font-size: 15.5px; color: #fecaca; margin-bottom: 20px; max-width: 520px; }
+
+  /* PAINEL RETRÁTIL DE QUESTS, INVENTÁRIO & INFORMAÇÕES (PAUSA O JOGO) */
+  #pause-modal {
+    position: absolute; inset: 0; background: rgba(2, 6, 23, 0.86);
+    backdrop-filter: blur(8px); display: none; align-items: center;
+    justify-content: center; z-index: 40; padding: 18px;
+  }
+  .modal-box {
+    width: 100%; max-width: 880px; max-height: 92%;
+    background: #0f172a; border: 1px solid #38bdf8;
+    border-radius: 14px; display: flex; flex-direction: column;
+    overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.65);
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 18px; background: #1e293b; border-bottom: 1px solid #334155;
+  }
+  .modal-header h3 { color: #f8fafc; font-size: 15.5px; }
+  .modal-tabs {
+    display: flex; gap: 6px; padding: 10px 18px 0 18px;
+    background: #0f172a; border-bottom: 1px solid #1e293b;
+  }
+  .tab-btn {
+    background: #1e293b; color: #94a3b8; border: 1px solid #334155;
+    border-bottom: none; padding: 7px 14px; border-radius: 8px 8px 0 0;
+    font-size: 12.5px; font-weight: 600; cursor: pointer;
+  }
+  .tab-btn.active { background: #0f172a; color: #38bdf8; border-color: #38bdf8; }
+  .modal-body {
+    padding: 16px 18px; overflow-y: auto; color: #e2e8f0;
+    font-size: 13px; line-height: 1.5; user-select: text;
+  }
+  .act-block {
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 10px;
+  }
+  .act-block h4 { color: #38bdf8; font-size: 13.5px; margin-bottom: 6px; }
+  .q-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 3px 0; border-bottom: 1px dashed rgba(148,163,184,0.15);
+    font-size: 12.2px;
+  }
+  .q-badge {
+    font-size: 11px; padding: 1px 7px; border-radius: 999px; font-weight: 700;
+  }
+  .q-done { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
+  .q-bonus { background: rgba(250, 204, 21, 0.2); color: #facc15; }
+  .inv-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px; margin-top: 8px;
+  }
+  .inv-slot {
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 8px; padding: 10px; text-align: center;
+  }
+  .inv-slot.collected { border-color: #22c55e; background: rgba(20, 83, 45, 0.28); }
 </style>
 </head>
 <body>
-<div id="canvas-container">
-  <div id="hud-top">
-    <!-- Status do Jogador -->
-    <div class="hud-card">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:14px;">
-        <span style="font-weight:700; font-size:14px;">🎓 Explorador CT — Bloco 734</span>
-        <span id="hp-text" style="font-weight:700; font-size:13px; color:#4ade80;">100 / 100 HP</span>
-      </div>
-      <div class="hp-bar-wrap"><div id="hp-bar"></div></div>
-      <div class="stats-row">
-        <span class="badge" id="pos-badge">Pos: (27.0, 0.2, 26.0)</span>
-        <span class="badge" id="cam-badge">Câm: 3ª Pessoa</span>
-        <span class="badge" id="vigilante-badge" style="color:#93c5fd;">👮 Vigilância: Calma</span>
-      </div>
-    </div>
+<div id="game-wrapper" tabindex="0">
+  <canvas id="c" tabindex="0"></canvas>
+  <div id="damage-flash"></div>
+  <div id="flash-screen"></div>
 
-    <!-- Checklist de Mini-Quests -->
-    <div class="hud-card" id="quest-list">
-      <div style="font-weight:700; font-size:13px; margin-bottom:4px; color:#38bdf8;">📋 Mini-Quests & Camadas CT</div>
-      <div id="q-foto" class="q-todo">⬜ 📸 Álbum Fotográfico & Solar (<span id="foto-count">0</span>/5)</div>
-      <div id="q-arvore" class="q-todo">⬜ 🌳 Subir na Árvore sem Cair</div>
-      <div id="q-poste" class="q-todo">⬜ 💡 Subir no Poste sem Cair</div>
-      <div id="q-predio" class="q-todo">⬜ ☀️ Telhado & Foto Painéis Fotovoltaicos</div>
-      <div id="q-rua" class="q-todo">⬜ 🚸 Atravessar na Faixa e Voltar</div>
-      <div id="q-creto" class="q-todo">⬜ 🎓 Quiz CG Rep. Prof. Creto (<span id="creto-count">0</span>/4)</div>
+  <!-- HUD SUPERIOR ESQUERDO -->
+  <div id="hud-top-left">
+    <div class="hud-pill">
+      <span>❤️ Life</span>
+      <div class="bar-bg"><div id="energy-fill"></div></div>
+      <span id="hp-text" style="color:#4ade80;">100%</span>
+      <span id="buff-tag" style="color:#facc15; display:none;">☕ Turbo!</span>
+      <span>•</span>
+      <span id="vigilante-badge" style="color:#93c5fd;">👮 Vigilância: Calma</span>
+    </div>
+    <div class="hud-pill">
+      <span>🎒 Inv: <b id="inv-count" style="color:#38bdf8;">0/8</b></span>
+      <span>•</span>
+      <span>🪟 Vidros: <b id="win-broken" style="color:#fb923c;">0/10</b></span>
+      <span>•</span>
+      <span>📸 Fotos: <b id="foto-count" style="color:#34d399;">0/5</b></span>
+      <span>•</span>
+      <span id="proj-badge" style="color:#a5f3fc;">📷 3ª Pessoa</span>
+    </div>
+    <div id="mini-quest-box">
+      <div style="font-weight:700; color:#38bdf8; margin-bottom:2px;">📋 Mini-Quests CT (Clique em Quests [Q] para detalhes)</div>
+      <div id="mq-foto" class="mq-todo">⬜ 📸 Álbum Fotográfico & Solar (<span id="mq-foto-n">0</span>/5)</div>
+      <div id="mq-arvore" class="mq-todo">⬜ 🌳 Subir na Árvore sem Cair [E]</div>
+      <div id="mq-poste" class="mq-todo">⬜ 💡 Subir no Poste sem Cair [E]</div>
+      <div id="mq-predio" class="mq-todo">⬜ ☀️ Telhado & Foto Painéis Solares</div>
+      <div id="mq-rua" class="mq-todo">⬜ 🚸 Atravessar na Faixa e Voltar</div>
+      <div id="mq-creto" class="mq-todo">⬜ 🎓 Quiz CG Rep. Prof. Creto (<span id="mq-creto-n">0</span>/4)</div>
     </div>
   </div>
 
-  <!-- Pilha de Alertas Dinâmicos -->
+  <!-- HUD SUPERIOR DIREITO -->
+  <div id="hud-top-right">
+    <button class="hud-btn" id="btn-survival">💀 Sobrevivência: OFF</button>
+    <button class="hud-btn" id="btn-audio">🔊 Som: ON</button>
+    <button class="hud-btn" id="btn-quests">📜 Inventário & Quests (Q)</button>
+    <button class="hud-btn" id="btn-fullscreen">⛶ Tela Cheia</button>
+  </div>
+
+  <!-- PILHA DE ALERTAS DINÂMICOS -->
   <div id="alert-stack"></div>
 
-  <!-- Medidor de Equilíbrio na Escalada -->
+  <!-- MEDIDOR DE EQUILÍBRIO NA ESCALADA -->
   <div id="climb-hud">
-    <div style="font-size:12.5px; font-weight:700; color:#7dd3fc;" id="climb-label">🧗 Escalando! Use [W/S] subir/descer e [A/D] equilibrar</div>
+    <div style="font-size:12px; font-weight:700; color:#7dd3fc;" id="climb-label">🧗 Escalando! Use [W/S] subir/descer e [A/D] equilibrar</div>
     <div class="balance-track"><div id="balance-needle"></div></div>
   </div>
 
-  <!-- Visor Fotográfico -->
+  <!-- VISOR FOTOGRÁFICO -->
   <div id="photo-overlay">
     <div class="viewfinder-box">
-      <div style="display:flex; justify-content:space-between; font-weight:700; font-size:14px; text-shadow:0 2px 6px #000;">
+      <div style="display:flex; justify-content:space-between; font-weight:700; font-size:13.5px; text-shadow:0 2px 6px #000; color:#fff;">
         <span>[REC ●] MODO FOTO TÉCNICA CT</span>
-        <span id="photo-target-hint">Alvo: Aponte para um ponto de interesse e pressione [P]</span>
+        <span id="photo-target-hint">Alvo: Aponte para um ponto de interesse e clique [P]</span>
       </div>
-      <div style="text-align:center; font-size:28px; opacity:0.7;">✛</div>
+      <div style="text-align:center; font-size:28px; opacity:0.75; color:#fff;">✛</div>
       <div style="text-align:center; font-size:12px; color:#e2e8f0; text-shadow:0 1px 4px #000;">
-        Pontos: Painéis Fotovoltaicos (Telhado) • Escultura • Fonte • Placa 734 • Cachorro Guardião
+        Pontos: Painéis Fotovoltaicos (Telhado) • Escultura • Fonte • Cachorro Guardião • Rep. Prof. Creto
       </div>
     </div>
   </div>
-  <div id="flash-screen"></div>
 
-  <!-- Cutscene Jumpscare -->
+  <!-- JUMPSCARE CORUJA -->
   <div id="jumpscare-overlay">
-    <div style="font-size:112px; line-height:1;">🦉👁️👁️</div>
-    <div style="font-size:32px; font-weight:900; color:#ef4444; margin-top:12px; text-shadow:0 0 20px #000;">
+    <div style="font-size:108px; line-height:1;">🦉👁️👁️</div>
+    <div style="font-size:30px; font-weight:900; color:#ef4444; margin-top:10px; text-shadow:0 0 20px #000;">
       SUSTO NO CAMPUS CT!
     </div>
-    <div style="font-size:15px; color:#fecaca; margin-top:8px;">
+    <div style="font-size:14.5px; color:#fecaca; margin-top:6px;">
       A Coruja Guardiã das Copas te pegou desprevenido!
     </div>
   </div>
 
-  <!-- Modal Quiz Prof. Creto -->
+  <!-- PROMPT DE PROXIMIDADE -->
+  <div id="interact-prompt"></div>
+
+  <!-- CARTÃO DE REALIDADE AUMENTADA -->
+  <div id="ar-card">
+    <span class="ar-tag">📡 REALIDADE AUMENTADA • BOUNDING BOX</span>
+    <h4 id="ar-title">Objeto</h4>
+    <p id="ar-desc">Descrição</p>
+    <div class="ar-meta" id="ar-meta">Primitiva • Transformação</div>
+  </div>
+
+  <!-- ATALHOS RÁPIDOS DE CÂMERA / PROJEÇÃO -->
+  <div id="hud-bottom-left">
+    <button class="action-btn" id="btn-cam-cycle" title="Alternar 3ª Pessoa, 1ª Pessoa, Oblíqua Desobstruída e Aérea">🎥 Câm. [V]</button>
+    <button class="action-btn" id="btn-vp" title="Alternar 1, 2 e 3 Pontos de Fuga">📐 Pontos Fuga</button>
+    <button class="action-btn" id="btn-iso" title="Alternar Projeção Isométrica / Ortográfica">🧊 Isométrica</button>
+    <button class="action-btn" id="btn-obl" title="Alternar Projeção Oblíqua Gabinete">📏 Oblíqua</button>
+  </div>
+
+  <!-- BOTÕES DE AÇÃO DO PERSONAGEM -->
+  <div id="hud-bottom-right">
+    <button class="action-btn photo" id="btn-photo">📸 Foto [P]</button>
+    <button class="action-btn creto" id="btn-creto">🎓 Rep. Creto</button>
+    <button class="action-btn dance" id="btn-dance">💃 Dançar [C]</button>
+    <button class="action-btn ar" id="btn-interact">🔍 Interagir/Escalar [E]</button>
+    <button class="action-btn atk" id="btn-attack">⚔️ Atacar [F]</button>
+    <button class="action-btn" id="btn-jump">⬆️ Pular [Espaço]</button>
+  </div>
+
+  <!-- LETTERBOX CUTSCENE -->
+  <div class="letterbox" id="lb-top"></div>
+  <div class="letterbox" id="lb-bottom"></div>
+  <div id="cutscene-caption">☕ Preparando um cafezinho expresso no Centro de Tecnologia...</div>
+
+  <!-- MODAL QUIZ PROF. CRETO -->
   <div id="creto-modal">
-    <div class="modal-card">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="font-weight:800; font-size:16px; color:#60a5fa;">🎓 Representante do Prof. Creto — Computação Gráfica</span>
-        <span id="creto-progress" class="badge" style="background:#1d4ed8;">Pergunta 1 / 4</span>
+    <div class="creto-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <span style="font-weight:800; font-size:15.5px; color:#60a5fa;">🎓 Representante do Prof. Creto — Computação Gráfica</span>
+        <span id="creto-progress" style="background:#1d4ed8; padding:3px 9px; border-radius:6px; font-size:12px; font-weight:700;">Pergunta 1 / 4</span>
       </div>
-      <p id="creto-question" style="margin-top:14px; font-size:14.5px; line-height:1.5; color:#f1f5f9;"></p>
+      <p id="creto-question" style="margin-top:12px; font-size:14px; line-height:1.5; color:#f1f5f9;"></p>
       <div id="creto-options"></div>
-      <div id="creto-feedback" style="margin-top:12px; font-size:13px; font-weight:700; min-height:20px;"></div>
-      <div style="margin-top:14px; display:flex; justify-content:flex-end;">
-        <button class="game-btn" onclick="fecharModalCreto()">Fechar [ESC]</button>
+      <div id="creto-feedback" style="margin-top:11px; font-size:12.5px; font-weight:700; min-height:20px;"></div>
+      <div style="margin-top:12px; display:flex; justify-content:flex-end;">
+        <button class="hud-btn" id="btn-close-creto">Fechar [ESC]</button>
       </div>
     </div>
   </div>
 
-  <!-- Barra Inferior de Ações -->
-  <div id="hud-bottom">
-    <div class="hud-card" style="font-size:12px; color:#cbd5e1; max-width:440px;">
-      <b>Controles:</b> <kbd>WASD</kbd> Mover • <kbd>Shift</kbd> Correr • <kbd>Espaço</kbd> Pular •
-      <kbd>E</kbd> Escalar/Descer • <kbd>F</kbd> Falar (Creto) • <kbd>P</kbd> Foto • <kbd>C</kbd> Câmera
-    </div>
-    <div class="btn-bar">
-      <button class="game-btn" onclick="alternarVisorFoto()">📸 Foto [P]</button>
-      <button class="game-btn" onclick="interagirEscalada()">🧗 Escalar [E]</button>
-      <button class="game-btn" onclick="abrirQuizCreto()">🎓 Rep. Creto [F]</button>
-      <button class="game-btn" id="btn-cam-obliqua" onclick="ativarCameraObliqua()">📐 Câm. Oblíqua</button>
-      <button class="game-btn" onclick="ciclarCamera()">🎥 Trocar Câm. [C]</button>
-      <button class="game-btn" onclick="dispararJumpscare()">👻 Susto</button>
-      <button class="game-btn" onclick="resetarJogador()">🔄 Respawn</button>
+  <!-- MODAL GAME OVER (MODO SOBREVIVÊNCIA) -->
+  <div id="gameover-modal">
+    <h2>💀 DUMB WAYS TO DIE — CT EDITION</h2>
+    <p id="gameover-reason">Você sofreu um acidente no campus do Bloco 734!</p>
+    <button class="hud-btn" id="btn-respawn" style="font-size:15px; padding:11px 24px; background:#dc2626; border-color:#fca5a5;">
+      🔄 Renascer na Praça do Bloco 734
+    </button>
+  </div>
+
+  <!-- PAINEL RETRÁTIL DE QUESTS, INVENTÁRIO & CONTROLES (PAUSA O JOGO) -->
+  <div id="pause-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>⏸️ JOGO PAUSADO — Inventário, Quests & Controles (Bloco 734)</h3>
+        <button class="hud-btn" id="btn-resume" style="background:#0284c7; border-color:#38bdf8;">▶ Voltar ao Jogo (Q)</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="tab-btn active" data-tab="tab-inv">🎒 Inventário & Mesas (8 Itens)</button>
+        <button class="tab-btn" data-tab="tab-quests">📜 Quests CG I (Atos I–VIII) & Camadas CT</button>
+        <button class="tab-btn" data-tab="tab-help">🧭 Controles & Mecânicas</button>
+      </div>
+
+      <div class="modal-body" id="tab-inv">
+        <p>Aproxime-se das <b>Mesas de Trabalho</b> (sob o Abrigo Metálico e na Praça) e pressione <b>[E]</b> para coletar suas entregas. Coletar todas ativa a <b>Cutscene de Comemoração</b>!</p>
+        <div class="inv-grid" id="inv-grid-container"></div>
+      </div>
+
+      <div class="modal-body" id="tab-quests" style="display:none;">
+        <div class="act-block">
+          <h4>🏰 ATO I — A Construção do Mundo</h4>
+          <div class="q-row"><span>🎯 Sub-quest 1.1 — "Tudo Tem Um Propósito" (Bloco 734 CT Coerente)</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>🎯 Sub-quest 1.2 — "O Primeiro Octante" (Todos vértices X, Y, Z &ge; 0)</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>🎯 Quest 2 — "O Zoo dos Objetos" (Esfera, Cilindro, Cone, Caixa, Arco e Malha)</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>🎯 Sub-quest 3.1 — "Diversidade" (&ge; 4 materiais distintos aplicados)</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>🎯 Sub-quest 3.2 — "A Pele Pintada" (Asfalto/Faixa, Calçada, Água, Solar, Placa 734)</span><span class="q-badge q-done">✔ Concluída</span></div>
+        </div>
+        <div class="act-block">
+          <h4>⚔️ ATO II — As Transformações Mágicas</h4>
+          <div class="q-row"><span>🎯 Quest 4 — "O Ritual da Translação" (Matrizes 4×4)</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>🎯 Sub-quest 5.1 — "O Eixo Sagrado" (Rotação X, Y e Z)</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>🎯 Sub-quest 5.2 — "O Eixo Livre" (Quatérnios nas copas/palmeira)</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>🎯 Quest 6 — "O Encantamento da Escala"</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>✂️ Quest Bônus 6.1 — "A Distorção" (Cisalhamento XY no Abrigo Metálico)</span><span class="q-badge q-bonus">+0.5 pts</span></div>
+          <div class="q-row"><span>🪞 Quest Bônus 6.2 — "O Reflexo Perfeito" (Espelho em plano arbitrário nos Cones)</span><span class="q-badge q-bonus">+0.5 pts</span></div>
+        </div>
+        <div class="act-block">
+          <h4>🔦 ATO III — A Luz e a Escuridão (Totens Interativos na Praça)</h4>
+          <div class="q-row"><span>💡 Sub-quest 7.1 — "A Chama Pontual" (4 Postes com atenuação quadrática)</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>🌫️ Sub-quest 7.2 — "O Brilho Ambiente" (Componente Ia)</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>🔦 Sub-quest Bônus 7.3 — "O Holofote" (Totem Liga/Desliga Spots)</span><span class="q-badge q-bonus" id="q-spot-badge">+1.0 pts</span></div>
+          <div class="q-row"><span>☀️ Sub-quest Bônus 7.4 — "O Sol Direcional" (Totem Liga/Desliga Sol)</span><span class="q-badge q-bonus" id="q-sun-badge">+0.5 pts</span></div>
+        </div>
+        <div class="act-block">
+          <h4>📷 ATOS IV & VIII — Câmera, IoT, Vigilância, Fotovoltaica & Quiz Creto</h4>
+          <div class="q-row"><span>👁️ Quests 8, 9 & 10 — Eye, At, Up, Distância Focal, Zoom In/Out & Pontos de Fuga</span><span class="q-badge q-done">✔ Concluída</span></div>
+          <div class="q-row"><span>☀️ Usina Fotovoltaica & Sensor IoT Perimetral no Telhado + Faixa de Pedestres</span><span class="q-badge q-done">✔ Ativo</span></div>
+          <div class="q-row"><span>👮 Vigilância Patrimonial, Cachorro Guardião & Quiz CG Rep. Prof. Creto</span><span class="q-badge q-bonus">+1.0 pts</span></div>
+        </div>
+      </div>
+
+      <div class="modal-body" id="tab-help" style="display:none;">
+        <div class="act-block">
+          <h4>🎮 Controles Unificados do Simulador 3D</h4>
+          <p>• <b>Clique na tela 3D + W A S D / Setas:</b> Caminhar (<b>Shift</b> corre; arraste o <b>Mouse</b> para girar a câmera e use a <b>Roda</b> para zoom).<br/>
+             • <b>[E] Interagir / Escalar / AR:</b> Ação contextual inteligente — coleta itens das mesas, toma café na cafeteira (<code>X=35.8, Z=18.8</code>), fala com o Rep. Prof. Creto (<code>X=28.5, Z=24.5</code>), escala Árvores/Postes/Escada (equilibre com <b>A/D</b>!) ou abre o Raio-X (AR) de qualquer monumento.<br/>
+             • <b>[F] Atacar:</b> Quebra as 10 janelas/porta curvas do Bloco 734, derrama asfalto CBUQ e aciona os Vigilantes Patrimoniais (suba numa árvore, poste ou escada para despistá-los!).<br/>
+             • <b>[P] Modo Foto Técnica:</b> Enquadra os Painéis Fotovoltaicos no telhado, Escultura, Fonte, Cachorro Guardião ou Rep. Prof. Creto.<br/>
+             • <b>[V] Trocar Câmera:</b> Alterna 3ª Pessoa Orbital, 1ª Pessoa, Oblíqua Desobstruída e Aérea Plongée.<br/>
+             • <b>[C] Comemorar:</b> Executa a dança comemorativa com música.<br/>
+             • <b>[Q] ou [Tab]:</b> Pausa o jogo e abre Inventário, Quests e Ajuda.</p>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-// ============================================================================
-// ÁUDIO PROCEDURAL (WEB AUDIO API — SEM DEPENDÊNCIAS EXTERNAS)
-// ============================================================================
-let audioCtx = null;
-function ensureAudio() {
-  if (!audioCtx) {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (AC) audioCtx = new AC();
-  }
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-}
-
-function playTone(freq, type, duration, vol = 0.14, slideTo = null) {
-  ensureAudio();
-  if (!audioCtx) return;
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-  if (slideTo) {
-    osc.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + duration);
-  }
-  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + duration);
-}
-
-function somAlertaIoT() { playTone(880, 'sine', 0.16, 0.10, 1180); }
-function somApitoVigilante() {
-  playTone(2600, 'triangle', 0.14, 0.14, 2900);
-  setTimeout(() => playTone(2750, 'triangle', 0.22, 0.14, 2400), 160);
-}
-function somLatidoCao() {
-  playTone(190, 'sawtooth', 0.14, 0.18, 95);
-  setTimeout(() => playTone(220, 'sawtooth', 0.16, 0.18, 85), 170);
-}
-function somFoto() {
-  playTone(1200, 'square', 0.05, 0.12, 400);
-  setTimeout(() => playTone(1600, 'sine', 0.07, 0.10, 900), 55);
-}
-function somJumpscare() {
-  playTone(110, 'sawtooth', 0.95, 0.28, 520);
-  playTone(147, 'square', 0.95, 0.24, 690);
-  playTone(740, 'sawtooth', 0.85, 0.22, 180);
-}
-function somAcerto() {
-  playTone(523.25, 'sine', 0.14, 0.16);
-  setTimeout(() => playTone(659.25, 'sine', 0.14, 0.16), 120);
-  setTimeout(() => playTone(783.99, 'sine', 0.26, 0.18), 240);
-}
-function somErro() {
-  playTone(185, 'sawtooth', 0.35, 0.18, 110);
-}
-
-// ============================================================================
-// CENA THREE.JS — BLOCO 734 (ALINHADA COM O MOTOR_CT.PY NO 1º OCTANTE)
-// ============================================================================
-const container = document.getElementById('canvas-container');
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.FogExp2(0x9ecae1, 0.0065);
-
-const camera = new THREE.PerspectiveCamera(58, container.clientWidth / container.clientHeight, 0.15, 260);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(container.clientWidth, container.clientHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-container.insertBefore(renderer.domElement, container.firstChild);
-
-// Iluminação
-const hemiLight = new THREE.HemisphereLight(0xe0f2fe, 0x475569, 0.72);
-scene.add(hemiLight);
-
-const sunLight = new THREE.DirectionalLight(0xfffbeb, 1.05);
-sunLight.position.set(12, 38, 8);
-sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(2048, 2048);
-sunLight.shadow.camera.left = -45;
-sunLight.shadow.camera.right = 45;
-sunLight.shadow.camera.top = 45;
-sunLight.shadow.camera.bottom = -45;
-scene.add(sunLight);
-
-// Materiais
-const matAsfalto = new THREE.MeshStandardMaterial({ color: 0x262930, roughness: 0.88 });
-const matFaixa = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 });
-const matCalcada = new THREE.MeshStandardMaterial({ color: 0xb4b0a8, roughness: 0.85 });
-const matAlvenaria = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.55 });
-const matVidro = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.15, metalness: 0.75 });
-const matGranito = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.4 });
-const matAgua = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.12, metalness: 0.45, transparent: true, opacity: 0.86 });
-const matAco = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.2, metalness: 0.88 });
-const matTronco = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.9 });
-const matFolha = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.75 });
-const matSolar = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.22, metalness: 0.65 });
-const matAsfaltoDerramado = new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.25, metalness: 0.3 });
-
-// 1. Piso Urbano (Via + Faixa de Pedestres + Calçada)
-const viaMesh = new THREE.Mesh(new THREE.BoxGeometry(66, 0.10, 14), matAsfalto);
-viaMesh.position.set(35, 0.05, 9);
-viaMesh.receiveShadow = true;
-scene.add(viaMesh);
-
-// Faixa de Pedestres em X = 25.5..28.5
-for (let zf = 3.2; zf <= 14.8; zf += 1.2) {
-  const zebra = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.02, 0.58), matFaixa);
-  zebra.position.set(27.0, 0.11, zf);
-  scene.add(zebra);
-}
-
-const calcadaMesh = new THREE.Mesh(new THREE.BoxGeometry(66, 0.20, 44), matCalcada);
-calcadaMesh.position.set(35, 0.10, 38);
-calcadaMesh.receiveShadow = true;
-scene.add(calcadaMesh);
-
-// 2. Bloco 734 (Ala Leste + Ala Sul + Fachada Arqueada R=22m)
-const alaLeste = new THREE.Mesh(new THREE.BoxGeometry(22, 6.4, 33), matAlvenaria);
-alaLeste.position.set(48, 3.4, 36.5);
-alaLeste.castShadow = true;
-alaLeste.receiveShadow = true;
-scene.add(alaLeste);
-
-const alaSul = new THREE.Mesh(new THREE.BoxGeometry(22, 6.4, 11), matAlvenaria);
-alaSul.position.set(26, 3.4, 47.5);
-alaSul.castShadow = true;
-alaSul.receiveShadow = true;
-scene.add(alaSul);
-
-const arcoGeo = new THREE.CylinderGeometry(22, 22, 6.4, 48, 1, false, Math.PI, Math.PI * 0.5);
-const arcoMesh = new THREE.Mesh(arcoGeo, matAlvenaria);
-arcoMesh.position.set(37, 3.4, 42);
-arcoMesh.castShadow = true;
-arcoMesh.receiveShadow = true;
-scene.add(arcoMesh);
-
-// Janelas na curva + Poças de Asfalto Derramado sob janelas
-const pocasAsfalto = [];
-for (let i = 0; i < 9; i++) {
-  const sMid = 0.24 + ((i + 0.5) / 9.0) * 0.72;
-  const ang = sMid * (Math.PI / 2.0);
-  const wx = 37.0 - 22.06 * Math.cos(ang);
-  const wz = 42.0 - 22.06 * Math.sin(ang);
-  const jan = new THREE.Mesh(new THREE.BoxGeometry(1.35, 1.8, 1.35), matVidro);
-  jan.position.set(wx, 2.3, wz);
-  jan.rotation.y = -ang;
-  scene.add(jan);
-
-  // Asfalto derramado nas janelas #2, #5 e #8
-  if (i === 1 || i === 4 || i === 7) {
-    const px = 37.0 - 23.1 * Math.cos(ang);
-    const pz = 42.0 - 23.1 * Math.sin(ang);
-    const poca = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.25, 0.06, 20), matAsfaltoDerramado);
-    poca.position.set(px, 0.23, pz);
-    scene.add(poca);
-    pocasAsfalto.push({ x: px, z: pz, r: 1.25 });
-  }
-}
-
-// 2B. Painéis Fotovoltaicos no Telhado (Y = 6.60m) + Balizador IoT de Borda
-const solarGroup = new THREE.Group();
-[29.0, 34.0].forEach((zf) => {
-  const painel = new THREE.Mesh(new THREE.BoxGeometry(11.0, 0.12, 2.2), matSolar);
-  painel.position.set(48.0, 7.05, zf);
-  painel.rotation.x = THREE.MathUtils.degToRad(22);
-  painel.castShadow = true;
-  solarGroup.add(painel);
-
-  const moldura = new THREE.Mesh(new THREE.BoxGeometry(11.15, 0.08, 2.32), matAco);
-  moldura.position.set(48.0, 6.98, zf);
-  moldura.rotation.x = THREE.MathUtils.degToRad(22);
-  solarGroup.add(moldura);
-});
-scene.add(solarGroup);
-
-// Balizador IoT laranja piscante na beirada do prédio
-const iotBeacon = new THREE.Mesh(
-  new THREE.SphereGeometry(0.28, 16, 16),
-  new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0xea580c, emissiveIntensity: 0.9 })
-);
-iotBeacon.position.set(38.5, 6.88, 21.2);
-scene.add(iotBeacon);
-
-// Escada Lateral de Acesso ao Telhado (X = 59.35, Z = 24.0)
-const escadaMesh = new THREE.Mesh(
-  new THREE.BoxGeometry(0.55, 6.6, 1.1),
-  new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.7, roughness: 0.3 })
-);
-escadaMesh.position.set(59.35, 3.5, 24.0);
-scene.add(escadaMesh);
-
-// 3. Fonte / Espelho d'Água
-const bordaFonte = new THREE.Mesh(new THREE.BoxGeometry(15.3, 0.34, 6.3), matGranito);
-bordaFonte.position.set(27.0, 0.37, 19.8);
-scene.add(bordaFonte);
-
-const aguaMesh = new THREE.Mesh(new THREE.BoxGeometry(14.7, 0.36, 5.7), matAgua);
-aguaMesh.position.set(27.0, 0.39, 19.8);
-scene.add(aguaMesh);
-
-// 4. Escultura Cinética (5 Losangos)
-const baseEsc = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.28, 3.6), matGranito);
-baseEsc.position.set(15.0, 0.34, 22.0);
-scene.add(baseEsc);
-
-const escGroup = new THREE.Group();
-escGroup.position.set(15.0, 0.48, 22.0);
-escGroup.rotation.y = THREE.MathUtils.degToRad(-24);
-for (let k = 0; k < 5; k++) {
-  const fc = k - 2;
-  const Lk = 2.35 * (1.0 - 0.055 * fc);
-  const frame = new THREE.Mesh(new THREE.TorusGeometry(Lk * 0.58, 0.09, 8, 4), matAco);
-  frame.position.set(fc * 0.22, Lk * 0.65 + 0.1, -1.16 + k * 0.58);
-  escGroup.add(frame);
-}
-scene.add(escGroup);
-
-// 5. Árvores Escaláveis + Coruja do Jumpscare
-const arvoresData = [
-  { nome: 'Árvore Bosque Esquerdo', x: 10.5, z: 28.5, h: 4.5, esc: 1.15, temCoruja: false },
-  { nome: 'Árvore Fundo Esquerdo', x: 11.5, z: 38.0, h: 4.9, esc: 1.25, temCoruja: true },
-  { nome: 'Árvore Praça Direita', x: 37.5, z: 17.5, h: 3.8, esc: 0.90, temCoruja: false }
-];
-arvoresData.forEach((a) => {
-  const tronco = new THREE.Mesh(new THREE.CylinderGeometry(0.32 * a.esc, 0.38 * a.esc, 3.4 * a.esc, 14), matTronco);
-  tronco.position.set(a.x, 0.2 + 1.7 * a.esc, a.z);
-  tronco.castShadow = true;
-  scene.add(tronco);
-
-  const copa = new THREE.Mesh(new THREE.SphereGeometry(1.75 * a.esc, 16, 16), matFolha);
-  copa.position.set(a.x, 0.2 + 3.7 * a.esc, a.z);
-  copa.castShadow = true;
-  scene.add(copa);
-
-  if (a.temCoruja) {
-    const coruja = new THREE.Mesh(
-      new THREE.ConeGeometry(0.35, 1.0, 12),
-      new THREE.MeshStandardMaterial({ color: 0x312e81, emissive: 0x1e1b4b })
-    );
-    coruja.position.set(a.x, 0.2 + 5.1 * a.esc, a.z);
-    scene.add(coruja);
-  }
-});
-
-// 6. Postes de Iluminação Escaláveis
-const postesData = [
-  { nome: 'Poste #1', x: 9.5, z: 21.0, h: 5.8 },
-  { nome: 'Poste #2', x: 18.5, z: 16.2, h: 5.8 },
-  { nome: 'Poste #3', x: 41.0, z: 16.5, h: 5.8 },
-  { nome: 'Poste #4', x: 54.5, z: 17.5, h: 5.8 }
-];
-postesData.forEach((p) => {
-  const mastro = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.11, 0.13, 6.0, 12),
-    new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8 })
-  );
-  mastro.position.set(p.x, 3.2, p.z);
-  mastro.castShadow = true;
-  scene.add(mastro);
-
-  const lamp = new THREE.Mesh(
-    new THREE.SphereGeometry(0.28, 12, 12),
-    new THREE.MeshStandardMaterial({ color: 0xfef08a, emissive: 0xfde047, emissiveIntensity: 0.9 })
-  );
-  lamp.position.set(p.x, 6.3, p.z + 0.25);
-  scene.add(lamp);
-});
-
-// 7. Veículos Dinâmicos na Via CT
-const carros = [];
-function criarCarro(corHex, x0, z0, dir) {
-  const g = new THREE.Group();
-  const corpo = new THREE.Mesh(
-    new THREE.BoxGeometry(4.3, 1.15, 2.0),
-    new THREE.MeshStandardMaterial({ color: corHex, metalness: 0.6, roughness: 0.25 })
-  );
-  corpo.position.y = 0.72;
-  corpo.castShadow = true;
-  g.add(corpo);
-
-  const cabine = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.75, 1.75), matVidro);
-  cabine.position.set(-0.2 * dir, 1.55, 0);
-  g.add(cabine);
-
-  g.position.set(x0, 0.1, z0);
-  scene.add(g);
-  carros.push({ mesh: g, dir, speed: 6.5 });
-}
-criarCarro(0xcbd5e1, 22.0, 7.2, 1);
-criarCarro(0xdc2626, 48.0, 10.6, -1);
-
-// 8. Cachorro Guardião Interativo (X = 13.5, Z = 17.5)
-const caoGroup = new THREE.Group();
-const matCao = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.8 });
-const caoCorpo = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.48, 0.48), matCao);
-caoCorpo.position.y = 0.55;
-caoCorpo.castShadow = true;
-caoGroup.add(caoCorpo);
-
-const caoCabeca = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.38, 0.38), matCao);
-caoCabeca.position.set(0.55, 0.82, 0);
-caoGroup.add(caoCabeca);
-
-const caoHome = new THREE.Vector3(13.5, 0.2, 17.5);
-caoGroup.position.copy(caoHome);
-scene.add(caoGroup);
-
-// 9. Vigilantes Patrimoniais (Protetores do Patrimônio Público)
-function criarVigilante(x0, z0) {
-  const g = new THREE.Group();
-  const tronco = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.28, 0.30, 1.1, 12),
-    new THREE.MeshStandardMaterial({ color: 0x1e3a8a })
-  );
-  tronco.position.y = 0.95;
-  g.add(tronco);
-
-  const cabeca = new THREE.Mesh(
-    new THREE.SphereGeometry(0.22, 12, 12),
-    new THREE.MeshStandardMaterial({ color: 0xfdba74 })
-  );
-  cabeca.position.y = 1.72;
-  g.add(cabeca);
-
-  const quepe = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.25, 0.24, 0.12, 12),
-    new THREE.MeshStandardMaterial({ color: 0x0f172a })
-  );
-  quepe.position.y = 1.92;
-  g.add(quepe);
-
-  g.position.set(x0, 0.2, z0);
-  scene.add(g);
-  return { mesh: g, home: new THREE.Vector3(x0, 0.2, z0), alertado: false };
-}
-const vigilantes = [criarVigilante(21.0, 24.5), criarVigilante(34.5, 24.5)];
-
-// 10. Representante do Prof. Creto (Monitor de Computação Gráfica)
-const cretoGroup = new THREE.Group();
-const cretoBata = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.28, 0.32, 1.15, 12),
-  new THREE.MeshStandardMaterial({ color: 0x047857 })
-);
-cretoBata.position.y = 0.95;
-cretoGroup.add(cretoBata);
-const cretoCabeca = new THREE.Mesh(
-  new THREE.SphereGeometry(0.23, 12, 12),
-  new THREE.MeshStandardMaterial({ color: 0xfed7aa })
-);
-cretoCabeca.position.y = 1.75;
-cretoGroup.add(cretoCabeca);
-const cretoAro = new THREE.Mesh(
-  new THREE.TorusGeometry(0.45, 0.04, 8, 24),
-  new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7 })
-);
-cretoAro.rotation.x = Math.PI / 2;
-cretoAro.position.y = 0.05;
-cretoGroup.add(cretoAro);
-cretoGroup.position.set(28.5, 0.2, 24.5);
-scene.add(cretoGroup);
-
-// 11. Avatar do Jogador
-const playerGroup = new THREE.Group();
-const pBody = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.26, 0.28, 1.05, 12),
-  new THREE.MeshStandardMaterial({ color: 0x2563eb })
-);
-pBody.position.y = 0.85;
-pBody.castShadow = true;
-playerGroup.add(pBody);
-
-const pHead = new THREE.Mesh(
-  new THREE.SphereGeometry(0.22, 12, 12),
-  new THREE.MeshStandardMaterial({ color: 0xffedd5 })
-);
-pHead.position.y = 1.62;
-pHead.castShadow = true;
-playerGroup.add(pHead);
-
-const player = {
-  pos: new THREE.Vector3(27.0, 0.2, 26.0),
-  velY: 0,
-  yaw: Math.PI,
-  hp: 100,
-  onGround: true,
-  climbing: null, // { tipo: 'arvore'|'poste'|'escada', nome, x, z, maxH, balance: 0 }
-  fountainTimer: 0,
-  jumpscareCooldown: 0,
-  damageCooldown: 0,
-  crossedOut: false,
-  quests: {
-    fotos: new Set(),
-    arvore: false,
-    poste: false,
-    predioSolar: false,
-    travessia: false,
-    cretoAcertos: 0
-  }
-};
-playerGroup.position.copy(player.pos);
-scene.add(playerGroup);
-
-// ============================================================================
-// CÂMERAS (INCLUINDO CÂMERA OBLÍQUA ELEVADA E DESOBSTRUÍDA)
-// ============================================================================
-const modosCamera = ['3ª Pessoa', '1ª Pessoa', 'Oblíqua Desobstruída', 'Aérea Plongée'];
-let camIndex = 0;
-
-function ciclarCamera() {
-  camIndex = (camIndex + 1) % modosCamera.length;
-  document.getElementById('cam-badge').innerText = 'Câm: ' + modosCamera[camIndex];
-  document.getElementById('btn-cam-obliqua').classList.toggle('active', camIndex === 2);
-}
-
-function ativarCameraObliqua() {
-  camIndex = 2; // 'Oblíqua Desobstruída'
-  document.getElementById('cam-badge').innerText = 'Câm: ' + modosCamera[camIndex];
-  document.getElementById('btn-cam-obliqua').classList.add('active');
-  mostrarAlerta('📐 Câmera Oblíqua ativada em cota elevada e desobstruída!', 'alert-info', 2200);
-}
-
-function atualizarCamera() {
-  const modo = modosCamera[camIndex];
-  if (modo === '1ª Pessoa') {
-    const eye = new THREE.Vector3(player.pos.x, player.pos.y + 1.65, player.pos.z);
-    const look = new THREE.Vector3(
-      eye.x + Math.sin(player.yaw) * 8,
-      eye.y - 0.3,
-      eye.z + Math.cos(player.yaw) * 8
-    );
-    camera.position.lerp(eye, 0.45);
-    camera.lookAt(look);
-  } else if (modo === 'Oblíqua Desobstruída') {
-    // Vista oblíqua elevada acima da linha das copas e sem obstrução de paredes
-    const target = new THREE.Vector3(player.pos.x, Math.max(player.pos.y + 1.2, 1.5), player.pos.z);
-    const desired = new THREE.Vector3(player.pos.x - 14.5, Math.max(player.pos.y + 14.0, 14.5), player.pos.z - 15.5);
-    desired.x = Math.max(3.5, Math.min(64.0, desired.x));
-    desired.z = Math.max(2.5, Math.min(56.0, desired.z));
-    camera.position.lerp(desired, 0.14);
-    camera.lookAt(target);
-  } else if (modo === 'Aérea Plongée') {
-    const desired = new THREE.Vector3(player.pos.x, player.pos.y + 22.0, player.pos.z - 12.0);
-    camera.position.lerp(desired, 0.14);
-    camera.lookAt(player.pos.x, player.pos.y + 1.0, player.pos.z);
-  } else {
-    // 3ª Pessoa padrão
-    const dist = 6.2;
-    const desired = new THREE.Vector3(
-      player.pos.x - Math.sin(player.yaw) * dist,
-      player.pos.y + 3.1,
-      player.pos.z - Math.cos(player.yaw) * dist
-    );
-    desired.y = Math.max(1.2, desired.y);
-    camera.position.lerp(desired, 0.18);
-    camera.lookAt(player.pos.x, player.pos.y + 1.4, player.pos.z);
-  }
-}
-
-// ============================================================================
-// SISTEMA DE ALERTAS, DANO, VIGILANTES E JUMPSCARE
-// ============================================================================
-const alertStack = document.getElementById('alert-stack');
-let lastAlertText = '';
-let lastAlertTime = 0;
-
-function mostrarAlerta(texto, classe = 'alert-iot', duracao = 2400) {
-  const now = performance.now();
-  if (texto === lastAlertText && now - lastAlertTime < 1400) return;
-  lastAlertText = texto;
-  lastAlertTime = now;
-
-  const div = document.createElement('div');
-  div.className = 'alert-banner ' + classe;
-  div.innerText = texto;
-  alertStack.appendChild(div);
-  setTimeout(() => { if (div.parentNode) div.remove(); }, duracao);
-}
-
-function aplicarDano(qtd, motivo) {
-  if (player.damageCooldown > 0) return;
-  player.hp = Math.max(0, player.hp - qtd);
-  player.damageCooldown = 1.0;
-  atualizarHUD();
-  mostrarAlerta(`💥 -${qtd} HP: ${motivo}`, 'alert-danger', 2400);
-  if (player.hp <= 0) {
-    mostrarAlerta('🏥 Energia esgotada! Retornando ao ponto seguro do Bloco 734...', 'alert-danger', 3200);
-    resetarJogador();
-  }
-}
-
-function acionarVigilantes(motivo) {
-  let novosAlertados = false;
-  vigilantes.forEach((v) => {
-    if (!v.alertado) novosAlertados = true;
-    v.alertado = true;
-  });
-  if (novosAlertados) somApitoVigilante();
-  document.getElementById('vigilante-badge').innerText = '🚨 Vigilância: PERSEGUINDO!';
-  document.getElementById('vigilante-badge').style.color = '#f87171';
-  mostrarAlerta(`👮 ALERTA PATRIMONIAL (${motivo})! Suba numa árvore, poste ou escada para escapar!`, 'alert-danger', 3000);
-}
-
-function dispararJumpscare() {
-  if (player.jumpscareCooldown > 0) return;
-  player.jumpscareCooldown = 6.0;
-  somJumpscare();
-  const ov = document.getElementById('jumpscare-overlay');
-  ov.style.display = 'flex';
-  setTimeout(() => {
-    ov.style.display = 'none';
-    mostrarAlerta('😱 SUSTO! A Coruja Guardiã do CT assustou você!', 'alert-danger', 2800);
-  }, 1550);
-}
-
-// ============================================================================
-// MINI-QUEST FOTOGRÁFICA [P]
-// ============================================================================
-let visorFotoAtivo = false;
-function alternarVisorFoto() {
-  visorFotoAtivo = !visorFotoAtivo;
-  document.getElementById('photo-overlay').style.display = visorFotoAtivo ? 'block' : 'none';
-  if (visorFotoAtivo) {
-    verificarAlvoFotografico();
-  }
-}
-
-function verificarAlvoFotografico() {
-  const p = player.pos;
-  let alvo = null;
-  if (p.y >= 6.2 && Math.hypot(p.x - 48.0, p.z - 31.5) < 8.5) {
-    alvo = 'Painéis Fotovoltaicos (Cobertura Bloco 734)';
-  } else if (Math.hypot(p.x - 15.0, p.z - 22.0) < 6.5) {
-    alvo = 'Escultura Cinética em Aço';
-  } else if (Math.hypot(p.x - 27.0, p.z - 19.8) < 8.0) {
-    alvo = 'Espelho d\'Água & Fachada Arqueada 734';
-  } else if (Math.hypot(p.x - caoGroup.position.x, p.z - caoGroup.position.z) < 7.0) {
-    alvo = 'Cachorro Guardião do CT';
-  } else if (Math.hypot(p.x - 28.5, p.z - 24.5) < 6.5) {
-    alvo = 'Representante do Prof. Creto';
-  }
-  document.getElementById('photo-target-hint').innerText = alvo
-    ? `🎯 Alvo Enquadrado: ${alvo} — Pressione [P] para clicar!`
-    : 'Alvo: Aproxime-se de um monumento, painel solar ou personagem e clique [P]';
-  return alvo;
-}
-
-function tirarFoto() {
-  somFoto();
-  const flash = document.getElementById('flash-screen');
-  flash.style.opacity = '0.92';
-  setTimeout(() => { flash.style.opacity = '0'; }, 120);
-
-  const alvo = verificarAlvoFotografico() || 'Panorama Geral Bloco 734';
-  player.quests.fotos.add(alvo);
-  if (alvo.includes('Fotovoltaicos')) {
-    player.quests.predioSolar = true;
-  }
-  mostrarAlerta(`📸 Foto salva: "${alvo}" (${player.quests.fotos.size}/5)!`, 'alert-success', 2600);
-  atualizarHUD();
-}
-
-// ============================================================================
-// ESCALADA SEM CAIR (ÁRVORE, POSTE E ESCADA DO PRÉDIO) [E]
-// ============================================================================
-function interagirEscalada() {
-  if (player.climbing) {
-    // Descer com segurança se estiver baixo, ou soltar
-    if (player.pos.y <= 1.2) {
-      player.pos.y = 0.2;
-      player.climbing = null;
-      document.getElementById('climb-hud').style.display = 'none';
-      mostrarAlerta('✅ Desceu em segurança!', 'alert-info', 1800);
-    } else {
-      // Soltar no alto faz cair!
-      player.climbing = null;
-      player.onGround = false;
-      player.velY = -1.0;
-      document.getElementById('climb-hud').style.display = 'none';
-      mostrarAlerta('⚠️ Você soltou no alto! Cuidado com a queda!', 'alert-iot', 2000);
-    }
-    return;
-  }
-
-  // Checar escada do prédio
-  if (Math.hypot(player.pos.x - 59.35, player.pos.z - 24.0) < 2.2) {
-    player.climbing = { tipo: 'escada', nome: 'Escada do Bloco 734', x: 59.0, z: 24.0, maxH: 6.65, balance: 0 };
-    document.getElementById('climb-hud').style.display = 'flex';
-    document.getElementById('climb-label').innerText = '🪜 Subindo Escada do Bloco 734! Use [W] para alcançar o telhado solar';
-    return;
-  }
-
-  // Checar árvores
-  for (const a of arvoresData) {
-    if (Math.hypot(player.pos.x - a.x, player.pos.z - a.z) < 1.85) {
-      player.climbing = { tipo: 'arvore', nome: a.nome, x: a.x, z: a.z, maxH: a.h, balance: 0, coruja: a.temCoruja };
-      document.getElementById('climb-hud').style.display = 'flex';
-      document.getElementById('climb-label').innerText = `🌳 Escalando ${a.nome}! Use [W] e equilibre com [A/D]`;
-      return;
-    }
-  }
-
-  // Checar postes
-  for (const pt of postesData) {
-    if (Math.hypot(player.pos.x - pt.x, player.pos.z - pt.z) < 1.65) {
-      player.climbing = { tipo: 'poste', nome: pt.nome, x: pt.x, z: pt.z, maxH: pt.h, balance: 0 };
-      document.getElementById('climb-hud').style.display = 'flex';
-      document.getElementById('climb-label').innerText = `💡 Escalando ${pt.nome}! Use [W] e equilibre com [A/D]`;
-      return;
-    }
-  }
-
-  mostrarAlerta('ℹ️ Aproxime-se de uma Árvore, Poste ou da Escada lateral (X=59.3) e pressione [E].', 'alert-info', 2300);
-}
-
-// ============================================================================
-// REPRESENTANTE DO PROF. CRETO — QUIZ DE COMPUTAÇÃO GRÁFICA (4 PERGUNTAS)
-// ============================================================================
-const bancoPerguntasCreto = [
-  {
-    q: "No ciclo trigonométrico usado em rotações 2D/3D, quais são os sinais de sin(θ) e cos(θ) no 2º Quadrante (90° < θ < 180°)?",
-    opts: [
-      "sin(θ) > 0 (positivo) e cos(θ) < 0 (negativo)",
-      "sin(θ) < 0 (negativo) e cos(θ) > 0 (positivo)",
-      "sin(θ) > 0 (positivo) e cos(θ) > 0 (positivo)",
-      "sin(θ) < 0 (negativo) e cos(θ) < 0 (negativo)"
-    ],
-    ans: 0,
-    exp: "No 2º Quadrante, a projeção vertical Y (seno) é positiva e a horizontal X (cosseno) é negativa."
-  },
-  {
-    q: "No 3º Quadrante (180° < θ < 270°), quais são os sinais de sin(θ) e cos(θ)?",
-    opts: [
-      "sin(θ) > 0 e cos(θ) < 0",
-      "sin(θ) < 0 (negativo) e cos(θ) < 0 (negativo)",
-      "sin(θ) < 0 e cos(θ) > 0",
-      "sin(θ) > 0 e cos(θ) > 0"
-    ],
-    ans: 1,
-    exp: "No 3º Quadrante, tanto X (cos θ) quanto Y (sin θ) estão nos semi-eixos negativos."
-  },
-  {
-    q: "No 4º Quadrante (270° < θ < 360°), quais são os sinais de sin(θ) e cos(θ)?",
-    opts: [
-      "sin(θ) > 0 e cos(θ) > 0",
-      "sin(θ) < 0 e cos(θ) < 0",
-      "sin(θ) < 0 (negativo) e cos(θ) > 0 (positivo)",
-      "sin(θ) > 0 e cos(θ) < 0"
-    ],
-    ans: 2,
-    exp: "No 4º Quadrante, X (cosseno) é positivo à direita e Y (seno) é negativo abaixo do eixo."
-  },
-  {
-    q: "No 1º Quadrante (0° < θ < 90°), quais são os sinais de sin(θ) e cos(θ)?",
-    opts: [
-      "sin(θ) > 0 (positivo) e cos(θ) > 0 (positivo)",
-      "sin(θ) < 0 (negativo) e cos(θ) > 0 (positivo)",
-      "sin(θ) > 0 (positivo) e cos(θ) < 0 (negativo)",
-      "sin(θ) = 0 e cos(θ) < 0"
-    ],
-    ans: 0,
-    exp: "No 1º Quadrante (assim como no Primeiro Octante 3D), ambas as coordenadas são positivas."
-  },
-  {
-    q: "Por que utilizamos Coordenadas Homogêneas 4D (x, y, z, w) nas matrizes de transformação da Computação Gráfica?",
-    opts: [
-      "Para permitir representar Translação, Rotação, Escala e Projeção como multiplicação de matrizes 4×4",
-      "Para eliminar o eixo Z e renderizar apenas em 2D",
-      "Para substituir o cálculo de vetores normais na equação de Phong",
-      "Para evitar o uso de seno e cosseno em rotações"
-    ],
-    ans: 0,
-    exp: "Com w=1 (pontos) e w=0 (vetores), a translação torna-se uma operação linear matricial 4×4."
-  },
-  {
-    q: "Na iluminação de Phong, qual componente depende do ângulo entre o vetor refletido R e o vetor do observador V?",
-    opts: [
-      "Componente Ambiente (Ia · Ka)",
-      "Componente Difusa Lambertiana (Id · Kd · (N·L))",
-      "Componente Especular (Ie · Ke · (R·V)^n)",
-      "Atenuação atmosférica"
-    ],
-    ans: 2,
-    exp: "O brilho especular concentra-se na direção do reflexo espelho R ponderado pelo expoente shininess n."
-  },
-  {
-    q: "Na câmera sintética (M_wc), como são obtidos os eixos ortonormais (xc, yc, zc) a partir de Eye, At e Up?",
-    opts: [
-      "zc = normalizar(Eye - At), xc = normalizar(Up × zc), yc = zc × xc",
-      "zc = Eye + At, xc = Up · At, yc = Eye × Up",
-      "xc = Eye - At, yc = Eye + Up, zc = (0,0,0)",
-      "zc = Up, xc = At, yc = Eye"
-    ],
-    ans: 0,
-    exp: "O eixo zc aponta da cena para a câmera (Eye - At) no sistema de mão direita."
-  }
-];
-
-let quizDeck = [];
-let quizIdx = 0;
-
-function abrirQuizCreto() {
-  // Embaralha e seleciona 4 perguntas novas a cada conversa
-  quizDeck = [...bancoPerguntasCreto].sort(() => Math.random() - 0.5).slice(0, 4);
-  quizIdx = 0;
-  player.quests.cretoAcertos = 0;
-  document.getElementById('creto-modal').style.display = 'flex';
-  renderizarPerguntaCreto();
-}
-
-function fecharModalCreto() {
-  document.getElementById('creto-modal').style.display = 'none';
-}
-
-function renderizarPerguntaCreto() {
-  const item = quizDeck[quizIdx];
-  document.getElementById('creto-progress').innerText = `Pergunta ${quizIdx + 1} / 4 • Acertos: ${player.quests.cretoAcertos}`;
-  document.getElementById('creto-question').innerText = item.q;
-  document.getElementById('creto-feedback').innerText = '';
-  const box = document.getElementById('creto-options');
-  box.innerHTML = '';
-  const letras = ['A', 'B', 'C', 'D'];
-  item.opts.forEach((optText, idx) => {
-    const btn = document.createElement('button');
-    btn.className = 'quiz-opt';
-    btn.innerText = `${letras[idx]}) ${optText}`;
-    btn.onclick = () => responderCreto(idx);
-    box.appendChild(btn);
-  });
-}
-
-function responderCreto(escolha) {
-  const item = quizDeck[quizIdx];
-  const fb = document.getElementById('creto-feedback');
-  const botoes = document.querySelectorAll('.quiz-opt');
-  botoes.forEach((b) => (b.disabled = true));
-
-  if (escolha === item.ans) {
-    somAcerto();
-    player.quests.cretoAcertos++;
-    player.hp = Math.min(100, player.hp + 10);
-    fb.style.color = '#4ade80';
-    fb.innerText = `🎉 ACERTOU! ${item.exp}`;
-    mostrarAlerta(`🎉 Boa! +10 HP (${player.quests.cretoAcertos}/4 acertos com Rep. Prof. Creto)`, 'alert-success', 2200);
-  } else {
-    somErro();
-    fb.style.color = '#f87171';
-    fb.innerText = `❌ ERROU! ${item.exp}`;
-    aplicarDano(15, 'Resposta incorreta no Quiz de Computação Gráfica!');
-  }
-  atualizarHUD();
-
-  setTimeout(() => {
-    quizIdx++;
-    if (quizIdx < 4) {
-      renderizarPerguntaCreto();
-    } else {
-      const aprov = player.quests.cretoAcertos >= 3;
-      fb.style.color = aprov ? '#4ade80' : '#fbbf24';
-      fb.innerText = aprov
-        ? `🏆 Desafio concluído (${player.quests.cretoAcertos}/4)! O Representante do Prof. Creto comemora sua aprovação!`
-        : `📚 Desafio encerrado (${player.quests.cretoAcertos}/4). Fale novamente com ele para tentar outra bateria de 4 perguntas!`;
-    }
-  }, 1700);
-}
-
-// ============================================================================
-// RESET & ATUALIZAÇÃO DO HUD
-// ============================================================================
-function resetarJogador() {
-  player.pos.set(27.0, 0.2, 26.0);
-  player.velY = 0;
-  player.hp = 100;
-  player.climbing = null;
-  player.fountainTimer = 0;
-  document.getElementById('climb-hud').style.display = 'none';
-  vigilantes.forEach((v) => {
-    v.alertado = false;
-    v.mesh.position.copy(v.home);
-  });
-  document.getElementById('vigilante-badge').innerText = '👮 Vigilância: Calma';
-  document.getElementById('vigilante-badge').style.color = '#93c5fd';
-  atualizarHUD();
-}
-
-function atualizarHUD() {
-  document.getElementById('hp-text').innerText = `${Math.round(player.hp)} / 100 HP`;
-  const bar = document.getElementById('hp-bar');
-  bar.style.width = `${player.hp}%`;
-  bar.style.background = player.hp > 50
-    ? 'linear-gradient(90deg, #22c55e, #4ade80)'
-    : player.hp > 25
-      ? 'linear-gradient(90deg, #f59e0b, #fbbf24)'
-      : 'linear-gradient(90deg, #dc2626, #f87171)';
-
-  document.getElementById('pos-badge').innerText = `Pos: (${player.pos.x.toFixed(1)}, ${player.pos.y.toFixed(1)}, ${player.pos.z.toFixed(1)})`;
-  document.getElementById('foto-count').innerText = player.quests.fotos.size;
-  document.getElementById('creto-count').innerText = player.quests.cretoAcertos;
-
-  const setQ = (id, ok) => {
-    const el = document.getElementById(id);
-    if (ok) {
-      el.className = 'q-done';
-      el.innerText = el.innerText.replace('⬜', '✅');
+(function() {
+  const MODO_NOITE = __MODO_NOITE__;
+  let sunEnabled = __ATIVAR_SOL__;
+  let spotsEnabled = __ATIVAR_SPOTS__;
+
+  const wrapper = document.getElementById('game-wrapper');
+  const canvas = document.getElementById('c');
+
+  // Garante foco imediato no teclado ao carregar ou clicar
+  setTimeout(() => { canvas.focus(); }, 150);
+  wrapper.addEventListener('pointerdown', () => { canvas.focus(); });
+
+  // ============================================================================
+  // 1. MOTOR DE ÁUDIO PROCEDURAL (WEB AUDIO API)
+  // ============================================================================
+  const SoundEngine = {
+    ctx: null,
+    enabled: true,
+    ambientTimer: null,
+    init() {
+      if (!this.ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) this.ctx = new AC();
+      }
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+      if (!this.ambientTimer) {
+        this.ambientTimer = setInterval(() => this.playAmbientTick(), 3600);
+      }
+    },
+    tone(freq, dur, type = 'sine', vol = 0.08, delay = 0, slideTo = null) {
+      if (!this.enabled) return;
+      this.init();
+      if (!this.ctx) return;
+      const t0 = this.ctx.currentTime + delay;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t0);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.linearRampToValueAtTime(vol, t0 + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.02);
+    },
+    playStep() {
+      const pitch = 155 + Math.random() * 35;
+      this.tone(pitch, 0.055, 'triangle', 0.075, 0, 75);
+    },
+    playJump() { this.tone(220, 0.18, 'sine', 0.09, 0, 520); },
+    playSwitch() {
+      this.tone(580, 0.07, 'square', 0.06, 0);
+      this.tone(860, 0.09, 'square', 0.06, 0.07);
+    },
+    playCollect() {
+      [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+        this.tone(f, 0.14, 'triangle', 0.09, i * 0.065);
+      });
+    },
+    playGlass() {
+      [1400, 1950, 2400, 1100, 1750].forEach((f, i) => {
+        this.tone(f + Math.random() * 300, 0.12, 'sawtooth', 0.06, i * 0.025, 320);
+      });
+      this.tone(110, 0.65, 'sine', 0.08, 0.1, 55);
+    },
+    playHonk() {
+      this.tone(415, 0.22, 'sawtooth', 0.07, 0);
+      this.tone(523, 0.22, 'sawtooth', 0.06, 0);
+    },
+    playScare() {
+      this.tone(920, 0.38, 'sawtooth', 0.14, 0, 240);
+      this.tone(95, 0.48, 'square', 0.14, 0, 38);
+    },
+    playIoT() { this.tone(880, 0.14, 'sine', 0.07, 0, 1180); },
+    playWhistle() {
+      this.tone(2600, 0.14, 'triangle', 0.10, 0, 2900);
+      this.tone(2750, 0.22, 'triangle', 0.10, 0.16, 2400);
+    },
+    playBark() {
+      this.tone(190, 0.13, 'sawtooth', 0.11, 0, 95);
+      this.tone(220, 0.15, 'sawtooth', 0.11, 0.16, 85);
+    },
+    playPhoto() {
+      this.tone(1200, 0.05, 'square', 0.09, 0, 400);
+      this.tone(1600, 0.07, 'sine', 0.08, 0.055, 900);
+    },
+    playErro() { this.tone(185, 0.32, 'sawtooth', 0.11, 0, 110); },
+    playCoffee() {
+      [330, 392, 494, 587, 659].forEach((f, i) => {
+        this.tone(f, 0.25, 'sine', 0.07, i * 0.22);
+      });
+    },
+    playDanceBeat() {
+      const notes = [
+        [329.6, 0.0], [329.6, 0.22], [392.0, 0.44], [440.0, 0.66],
+        [392.0, 0.96], [329.6, 1.22], [293.7, 1.48], [329.6, 1.75],
+        [440.0, 2.15], [392.0, 2.40], [329.6, 2.65], [392.0, 2.95], [523.3, 3.25]
+      ];
+      notes.forEach(([f, d]) => this.tone(f, 0.18, 'square', 0.065, d));
+    },
+    playAmbientTick() {
+      if (!this.enabled || !this.ctx || this.ctx.state !== 'running') return;
+      if (MODO_NOITE || !sunEnabled) {
+        this.tone(3600, 0.04, 'sine', 0.012, 0);
+        this.tone(3650, 0.04, 'sine', 0.012, 0.08);
+      } else {
+        const base = 1800 + Math.random() * 500;
+        this.tone(base, 0.08, 'sine', 0.015, 0, base * 1.25);
+        this.tone(base * 1.15, 0.09, 'sine', 0.015, 0.14, base * 0.9);
+      }
     }
   };
-  setQ('q-foto', player.quests.fotos.size >= 3);
-  setQ('q-arvore', player.quests.arvore);
-  setQ('q-poste', player.quests.poste);
-  setQ('q-predio', player.quests.predioSolar);
-  setQ('q-rua', player.quests.travessia);
-  setQ('q-creto', player.quests.cretoAcertos >= 4);
-}
 
-// ============================================================================
-// TECLADO & LOOP DE FÍSICA / REGRAS DO MUNDO
-// ============================================================================
-const keys = {};
-window.addEventListener('keydown', (e) => {
-  ensureAudio();
-  const k = e.key.toLowerCase();
-  keys[k] = true;
-  if (k === 'p') {
-    if (!visorFotoAtivo) alternarVisorFoto();
-    else tirarFoto();
-  } else if (k === 'e') {
-    interagirEscalada();
-  } else if (k === 'f') {
-    abrirQuizCreto();
-  } else if (k === 'c') {
-    ciclarCamera();
-  } else if (k === 'escape') {
-    fecharModalCreto();
-    if (visorFotoAtivo) alternarVisorFoto();
-  }
-});
-window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
-
-function alturaPiso(x, z) {
-  // Telhado do Bloco 734 (Ala Leste + Ala Sul + Arco R=22)
-  const naAlaLeste = (x >= 37.0 && x <= 59.0 && z >= 20.0 && z <= 53.0);
-  const naAlaSul = (x >= 15.0 && x <= 37.0 && z >= 42.0 && z <= 53.0);
-  const noArco = (x <= 37.0 && z <= 42.0 && Math.hypot(x - 37.0, z - 42.0) <= 22.0);
-  if ((naAlaLeste || naAlaSul || noArco) && player.pos.y >= 6.1) {
-    return 6.60;
-  }
-  return z < 16.0 ? 0.10 : 0.20;
-}
-
-const clock = new THREE.Clock();
-
-function animate() {
-  requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
-  const tNow = clock.getElapsedTime();
-
-  if (player.damageCooldown > 0) player.damageCooldown -= dt;
-  if (player.jumpscareCooldown > 0) player.jumpscareCooldown -= dt;
-
-  // Pulsar balizador IoT da beirada
-  iotBeacon.scale.setScalar(1.0 + 0.25 * Math.sin(tNow * 8.0));
-
-  // 1. Movimento dos Carros na Via
-  carros.forEach((c) => {
-    c.mesh.position.x += c.dir * c.speed * dt;
-    if (c.dir > 0 && c.mesh.position.x > 65.0) c.mesh.position.x = 5.0;
-    if (c.dir < 0 && c.mesh.position.x < 5.0) c.mesh.position.x = 65.0;
-
-    // Colisão com veículo
-    if (Math.abs(player.pos.x - c.mesh.position.x) < 2.35 && Math.abs(player.pos.z - c.mesh.position.z) < 1.35 && player.pos.y < 1.5) {
-      aplicarDano(25, 'Atropelamento na faixa de veículos!');
-    }
+  document.getElementById('btn-audio').addEventListener('click', (e) => {
+    SoundEngine.enabled = !SoundEngine.enabled;
+    e.target.textContent = SoundEngine.enabled ? '🔊 Som: ON' : '🔇 Som: OFF';
+    if (SoundEngine.enabled) SoundEngine.playSwitch();
   });
 
-  // 2. Lógica de Escalada vs Movimento Livre
-  if (player.climbing) {
-    const cl = player.climbing;
-    player.pos.x = cl.x;
-    player.pos.z = cl.z;
-    if (keys['w'] || keys['arrowup']) player.pos.y += 2.6 * dt;
-    if (keys['s'] || keys['arrowdown']) player.pos.y -= 2.6 * dt;
+  // ============================================================================
+  // 2. RENDERER WEBGL & CÂMERAS
+  // ============================================================================
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(wrapper.clientWidth, wrapper.clientHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    // Oscilação de equilíbrio em Árvore e Poste
-    if (cl.tipo === 'arvore' || cl.tipo === 'poste') {
-      cl.balance += (Math.sin(tNow * 3.7) * 0.55) * dt;
-      if (keys['a'] || keys['arrowleft']) cl.balance -= 1.35 * dt;
-      if (keys['d'] || keys['arrowright']) cl.balance += 1.35 * dt;
-      const pct = 50 + cl.balance * 50;
-      document.getElementById('balance-needle').style.left = `${Math.max(4, Math.min(96, pct))}%`;
+  const scene = new THREE.Scene();
+  const perspCamera = new THREE.PerspectiveCamera(58, wrapper.clientWidth / wrapper.clientHeight, 0.1, 260);
+  const frustumSize = 26;
+  const aspect0 = wrapper.clientWidth / wrapper.clientHeight;
+  const orthoCamera = new THREE.OrthographicCamera(
+    -frustumSize * aspect0 * 0.5, frustumSize * aspect0 * 0.5,
+    frustumSize * 0.5, -frustumSize * 0.5, -60, 220
+  );
 
-      if (Math.abs(cl.balance) > 0.96) {
-        // Perdeu equilíbrio e caiu!
-        player.climbing = null;
-        player.onGround = false;
-        player.velY = -2.0;
-        document.getElementById('climb-hud').style.display = 'none';
-        aplicarDano(15, `Perdeu o equilíbrio e caiu de ${cl.nome}!`);
-      }
-    }
+  let projMode = 'perspectiva'; // 'perspectiva' | 'isometrica' | 'obliqua'
+  let vanishingMode = 2; // 1, 2, 3
+  const camViewModes = ['3ª Pessoa', '1ª Pessoa', 'Oblíqua Desobstruída', 'Aérea Plongée'];
+  let camViewIdx = 0;
 
-    if (player.climbing && player.pos.y >= cl.maxH) {
-      player.pos.y = cl.maxH;
-      if (cl.tipo === 'arvore') {
-        player.quests.arvore = true;
-        mostrarAlerta('🌳 Mini-Quest Concluída: Subiu na Árvore sem cair!', 'alert-success', 2600);
-        if (cl.coruja) dispararJumpscare();
-      } else if (cl.tipo === 'poste') {
-        player.quests.poste = true;
-        mostrarAlerta('💡 Mini-Quest Concluída: Subiu no Poste sem cair!', 'alert-success', 2600);
-      } else if (cl.tipo === 'escada') {
-        // Desembarca no telhado do Bloco 734
-        player.pos.set(57.2, 6.60, 24.0);
-        player.climbing = null;
-        document.getElementById('climb-hud').style.display = 'none';
-        mostrarAlerta('☀️ Você chegou ao telhado! Visite os Painéis Fotovoltaicos e tire uma foto [P]!', 'alert-info', 3000);
-      }
-      atualizarHUD();
-    }
-    if (player.climbing && player.pos.y <= 0.25) {
-      player.pos.y = 0.20;
-      player.climbing = null;
-      document.getElementById('climb-hud').style.display = 'none';
-    }
-  } else {
-    // Movimento horizontal WASD
-    const speed = keys['shift'] ? 9.2 : 5.6;
-    let moveF = 0;
-    if (keys['w'] || keys['arrowup']) moveF += 1;
-    if (keys['s'] || keys['arrowdown']) moveF -= 1;
-    if (keys['a'] || keys['arrowleft']) player.yaw += 2.3 * dt;
-    if (keys['d'] || keys['arrowright']) player.yaw -= 2.3 * dt;
+  // ============================================================================
+  // 3. ILUMINAÇÃO DINÂMICA (SOL DIRECIONAL & HOLOFOTES / SPOTS)
+  // ============================================================================
+  const hemiLight = new THREE.HemisphereLight(0xe0f2fe, 0x475569, 0.85);
+  scene.add(hemiLight);
 
-    const nx = player.pos.x + Math.sin(player.yaw) * moveF * speed * dt;
-    const nz = player.pos.z + Math.cos(player.yaw) * moveF * speed * dt;
+  const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.15);
+  dirLight.position.set(12, 34, 8);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.set(2048, 2048);
+  dirLight.shadow.camera.near = 2;
+  dirLight.shadow.camera.far = 110;
+  const dCam = 44;
+  dirLight.shadow.camera.left = -dCam;
+  dirLight.shadow.camera.right = dCam;
+  dirLight.shadow.camera.top = dCam;
+  dirLight.shadow.camera.bottom = -dCam;
+  scene.add(dirLight);
 
-    // Limites do campus (1º Octante)
-    const candX = Math.max(3.0, Math.min(66.5, nx));
-    const candZ = Math.max(2.5, Math.min(58.5, nz));
+  const spotLightsList = [];
+  const spotEsc = new THREE.SpotLight(0xbae6fd, 2.6, 32, Math.PI / 5, 0.35, 1);
+  spotEsc.position.set(12.5, 5.2, 18.0);
+  spotEsc.target.position.set(15.0, 1.8, 22.0);
+  scene.add(spotEsc, spotEsc.target);
+  spotLightsList.push(spotEsc);
 
-    // Colisão com paredes do térreo do Bloco 734 se player.pos.y < 6.1
-    let bloqueado = false;
-    if (player.pos.y < 6.1) {
-      const inLeste = (candX >= 36.7 && candX <= 59.3 && candZ >= 19.7 && candZ <= 53.3);
-      const inSul = (candX >= 14.7 && candX <= 37.3 && candZ >= 41.7 && candZ <= 53.3);
-      const inArco = (candX <= 37.3 && candZ <= 42.3 && Math.hypot(candX - 37.0, candZ - 42.0) <= 22.3);
-      if (inLeste || inSul || inArco) bloqueado = true;
-    }
+  const spotBulbs = [];
+  [22.0, 27.0, 32.0].forEach((sx) => {
+    const sp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.17, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0x67e8f9 })
+    );
+    sp.position.set(sx, 0.34, 17.12);
+    scene.add(sp);
+    spotBulbs.push(sp);
 
-    if (!bloqueado) {
-      player.pos.x = candX;
-      player.pos.z = candZ;
-    }
-
-    // Pulo & Gravidade
-    if (keys[' '] && player.onGround) {
-      player.velY = 6.8;
-      player.onGround = false;
-    }
-    const piso = alturaPiso(player.pos.x, player.pos.z);
-    if (!player.onGround || player.pos.y > piso + 0.02) {
-      player.velY -= 16.5 * dt;
-      player.pos.y += player.velY * dt;
-      if (player.pos.y <= piso) {
-        if (player.velY < -11.5) {
-          aplicarDano(20, 'Queda de grande altura!');
-        }
-        player.pos.y = piso;
-        player.velY = 0;
-        player.onGround = true;
-      }
-    } else {
-      player.pos.y = piso;
-      player.onGround = true;
-    }
-  }
-
-  playerGroup.position.copy(player.pos);
-  playerGroup.rotation.y = player.yaw;
-
-  // 3. Sensores IoT & Regras Ambientais
-  // 3A. IoT Beirada do Telhado
-  if (player.pos.y >= 6.2) {
-    const distArco = Math.abs(Math.hypot(player.pos.x - 37.0, player.pos.z - 42.0) - 22.0);
-    const pertoBorda =
-      (player.pos.x > 57.5) ||
-      (player.pos.z < 21.4) ||
-      (player.pos.z > 51.5) ||
-      (player.pos.x < 16.5) ||
-      (player.pos.x <= 37.2 && player.pos.z <= 42.2 && distArco < 1.6);
-    if (pertoBorda) {
-      somAlertaIoT();
-      mostrarAlerta('📡 SENSOR IoT TELHADO: RISCO DE QUEDA DETECTADO NA BEIRADA DO PRÉDIO!', 'alert-iot', 1800);
-    }
-  }
-
-  // 3B. IoT Faixa de Veículos & Mini-Quest Travessia
-  if (player.pos.y < 1.5 && player.pos.z < 15.8) {
-    somAlertaIoT();
-    mostrarAlerta('📡 ALERTA IoT VIÁRIO: VOCÊ ESTÁ NA FAIXA DE VEÍCULOS! Use a faixa de pedestres.', 'alert-iot', 1800);
-    if (player.pos.x >= 25.0 && player.pos.x <= 29.0 && player.pos.z <= 4.0) {
-      player.crossedOut = true;
-      mostrarAlerta('🚸 Boa! Metade da travessia concluída — agora retorne pela faixa!', 'alert-info', 2200);
-    }
-  } else if (player.crossedOut && player.pos.z >= 16.2) {
-    player.crossedOut = false;
-    player.quests.travessia = true;
-    mostrarAlerta('✅ Mini-Quest Concluída: Atravessou a rua na faixa e retornou em segurança!', 'alert-success', 2800);
-    atualizarHUD();
-  }
-
-  // 3C. Fonte (Espelho d'Água) — Dano se demorar + Vigilante
-  const naFonte = (player.pos.x >= 19.65 && player.pos.x <= 34.35 && player.pos.z >= 16.95 && player.pos.z <= 22.65 && player.pos.y < 1.2);
-  if (naFonte) {
-    player.fountainTimer += dt;
-    mostrarAlerta('⚠️ ÁREA RESTRITA: Não é permitido permanecer dentro da fonte!', 'alert-iot', 1500);
-    if (player.fountainTimer > 1.6) {
-      aplicarDano(10, 'Permanência não autorizada dentro da fonte!');
-      acionarVigilantes('Invasão da Fonte');
-    }
-  } else {
-    player.fountainTimer = Math.max(0, player.fountainTimer - dt);
-  }
-
-  // 3D. Escultura Cinética — Proteção Patrimonial
-  if (Math.hypot(player.pos.x - 15.0, player.pos.z - 22.0) < 2.25 && player.pos.y < 2.5) {
-    acionarVigilantes('Aproximação/Escalada na Obra de Arte');
-  }
-
-  // 3E. Asfalto Derramado nas Janelas — Dano + Vigilante
-  for (const poca of pocasAsfalto) {
-    if (Math.hypot(player.pos.x - poca.x, player.pos.z - poca.z) < poca.r && player.pos.y < 1.0) {
-      aplicarDano(12, 'Contato com asfalto derramado sob as janelas!');
-      acionarVigilantes('Ocorrência nas Janelas (Asfalto)');
-      break;
-    }
-  }
-
-  // 3F. Zona Sombria Ala Sul (segundo gatilho de susto)
-  if (Math.hypot(player.pos.x - 16.2, player.pos.z - 40.5) < 1.4 && player.pos.y < 1.5) {
-    dispararJumpscare();
-  }
-
-  // 4. Cachorro Guardião Territorial (Avança na área oeste)
-  const distCaoPlayer = Math.hypot(player.pos.x - caoHome.x, player.pos.z - caoHome.z);
-  if (distCaoPlayer < 6.8 && player.pos.y < 1.8) {
-    // Avança na direção do jogador
-    const dirCao = new THREE.Vector3(player.pos.x - caoGroup.position.x, 0, player.pos.z - caoGroup.position.z);
-    if (dirCao.length() > 0.1) {
-      dirCao.normalize();
-      caoGroup.position.addScaledVector(dirCao, 6.2 * dt);
-      caoGroup.rotation.y = Math.atan2(-dirCao.z, dirCao.x);
-    }
-    if (Math.sin(tNow * 12) > 0.92) somLatidoCao();
-    mostrarAlerta('🐕 CUIDADO! Cachorro Guardião avançando em seu território! Afaste-se ou suba em algo!', 'alert-danger', 1600);
-    if (Math.hypot(player.pos.x - caoGroup.position.x, player.pos.z - caoGroup.position.z) < 1.25 && player.pos.y < 1.4) {
-      aplicarDano(15, 'Mordida do Cachorro Guardião!');
-    }
-  } else {
-    // Retorna calmamente ao posto
-    const back = new THREE.Vector3().subVectors(caoHome, caoGroup.position);
-    if (back.length() > 0.2) {
-      back.normalize();
-      caoGroup.position.addScaledVector(back, 2.5 * dt);
-    }
-  }
-
-  // 5. IA dos Vigilantes Patrimoniais (Perseguição e Fuga Vertical)
-  const jogadorEscapouNoAlto = (player.pos.y >= 2.2) || (player.climbing !== null && player.pos.y >= 2.0);
-  vigilantes.forEach((v) => {
-    if (v.alertado) {
-      if (jogadorEscapouNoAlto) {
-        // Jogador escapou subindo na árvore, poste ou escada!
-        v.alertado = false;
-        document.getElementById('vigilante-badge').innerText = '👮 Vigilância: Despistada (Alto)';
-        document.getElementById('vigilante-badge').style.color = '#4ade80';
-        mostrarAlerta('🧗 Você escapou do vigilante subindo para o alto!', 'alert-success', 2500);
-      } else {
-        const dirV = new THREE.Vector3(player.pos.x - v.mesh.position.x, 0, player.pos.z - v.mesh.position.z);
-        const distV = dirV.length();
-        if (distV > 0.1) {
-          dirV.normalize();
-          v.mesh.position.addScaledVector(dirV, 4.7 * dt);
-          v.mesh.rotation.y = Math.atan2(dirV.x, dirV.z);
-        }
-        if (distV < 1.15) {
-          v.alertado = false;
-          document.getElementById('vigilante-badge').innerText = '👮 Vigilância: Calma';
-          aplicarDano(20, 'Detido pelo Vigilante Patrimonial!');
-          player.pos.set(27.0, 0.2, 26.0);
-        }
-      }
-    } else {
-      const backV = new THREE.Vector3().subVectors(v.home, v.mesh.position);
-      if (backV.length() > 0.25) {
-        backV.normalize();
-        v.mesh.position.addScaledVector(backV, 2.2 * dt);
-      }
-    }
+    const pSub = new THREE.PointLight(0x38bdf8, 1.3, 12);
+    pSub.position.set(sx, 0.85, 17.4);
+    scene.add(pSub);
+    spotLightsList.push(pSub);
   });
 
-  // 6. Proximidade com Representante do Prof. Creto
-  if (Math.hypot(player.pos.x - 28.5, player.pos.z - 24.5) < 2.4 && player.pos.y < 1.5) {
-    mostrarAlerta('🎓 Representante do Prof. Creto por perto! Pressione [F] para o Quiz de CG (4 perguntas).', 'alert-info', 1600);
+  const posteLights = [];
+  [[9.5, 21.0, 0.6], [18.5, 16.2, 0.4], [41.0, 16.5, 0.0], [54.5, 17.5, -0.5]].forEach(([px, pz, ox]) => {
+    const pt = new THREE.PointLight(0xfde68a, 1.3, 24);
+    pt.position.set(px + ox, 6.0, pz + 0.4);
+    scene.add(pt);
+    posteLights.push(pt);
+  });
+
+  function atualizarIluminacaoCena() {
+    const isDark = MODO_NOITE || !sunEnabled;
+    scene.background = new THREE.Color(isDark ? 0x060b19 : 0x8ec5fc);
+    scene.fog = new THREE.FogExp2(isDark ? 0x060b19 : 0x93c5fd, isDark ? 0.013 : 0.006);
+    hemiLight.color.setHex(isDark ? 0x1e293b : 0xe0f2fe);
+    hemiLight.intensity = isDark ? 0.48 : 0.88;
+    dirLight.visible = sunEnabled;
+    dirLight.intensity = MODO_NOITE ? 0.25 : 1.15;
+
+    spotLightsList.forEach(l => { l.visible = spotsEnabled; });
+    spotBulbs.forEach(b => { b.material.color.setHex(spotsEnabled ? 0x67e8f9 : 0x334155); });
+    posteLights.forEach(p => { p.intensity = isDark ? 1.45 : 0.25; });
+
+    const bSun = document.getElementById('q-sun-badge');
+    const bSpot = document.getElementById('q-spot-badge');
+    if (bSun) bSun.textContent = sunEnabled ? '✔ Sol ON (+0.5 pts)' : '⚠️ Sol OFF';
+    if (bSpot) bSpot.textContent = spotsEnabled ? '✔ Spots ON (+1.0 pts)' : '⚠️ Spots OFF';
   }
 
-  if (visorFotoAtivo) verificarAlvoFotografico();
-  atualizarCamera();
-  atualizarHUD();
-  renderer.render(scene, camera);
-}
+  // ============================================================================
+  // 4. MATERIAIS & CONSTRUÇÃO DO CENÁRIO BLOCO 734
+  // ============================================================================
+  const matAsfalto = new THREE.MeshStandardMaterial({ color: 0x262930, roughness: 0.9 });
+  const matFaixa = new THREE.MeshBasicMaterial({ color: 0xeab308 });
+  const matZebra = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 });
+  const matCalcada = new THREE.MeshStandardMaterial({ color: 0xb0aea8, roughness: 0.85 });
+  const matAlvenaria = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.65 });
+  const matVidro = new THREE.MeshStandardMaterial({
+    color: 0x0f172a, roughness: 0.12, metalness: 0.8, transparent: true, opacity: 0.86
+  });
+  const matEsquadria = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.6, roughness: 0.4 });
+  const matAcoBranco = new THREE.MeshStandardMaterial({ color: 0xf8fafc, metalness: 0.35, roughness: 0.25 });
+  const matConcreto = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.8 });
+  const matTronco = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.9 });
+  const matFolha1 = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.75 });
+  const matFolha2 = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.7 });
+  const matAgua = new THREE.MeshStandardMaterial({
+    color: 0x0ea5e9, roughness: 0.15, metalness: 0.4, transparent: true, opacity: 0.82
+  });
+  const matGranito = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6 });
+  const matCone = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.45 });
+  const matMetalGalv = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.7, roughness: 0.3, side: THREE.DoubleSide });
+  const matMadeira = new THREE.MeshStandardMaterial({ color: 0x854d27, roughness: 0.65 });
+  const matPapel = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 });
+  const matTelaPC = new THREE.MeshStandardMaterial({ color: 0x0284c7, emissive: 0x0369a1, emissiveIntensity: 0.6 });
+  const matSolar = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.22, metalness: 0.65 });
 
-window.addEventListener('resize', () => {
-  camera.aspect = container.clientWidth / container.clientHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(container.clientWidth, container.clientHeight);
-});
+  function addBox(w, h, d, mat, x, y, z, ry = 0, cast = true) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    if (ry) m.rotation.y = ry;
+    m.castShadow = cast;
+    m.receiveShadow = true;
+    scene.add(m);
+    return m;
+  }
 
-atualizarHUD();
-animate();
-</script>
-</body>
-</html>
-"""
+  const arObjects = [];
+  const clickableTotems = [];
+  function registrarAR(nome, tag, desc, meta, center, size, extra = {}) {
+    arObjects.push({
+      nome, tag, desc, meta,
+      center: new THREE.Vector3(...center),
+      size: new THREE.Vector3(...size),
+      ...extra
+    });
+  }
 
+  // Piso Urbano + Faixas + Faixa de Pedestres Zebrada (X = 25.5..28.5)
+  addBox(66, 0.1, 14, matAsfalto, 35, 0.05, 9, 0, false);
+  addBox(64, 0.02, 0.14, matFaixa, 35, 0.11, 11.5, 0, false);
+  addBox(64, 0.02, 0.14, matFaixa, 35, 0.11, 11.9, 0, false);
+  for (let zf = 3.2; zf <= 14.8; zf += 1.2) {
+    addBox(3.0, 0.02, 0.58, matZebra, 27.0, 0.11, zf, 0, false);
+  }
+  addBox(66, 0.2, 44, matCalcada, 35, 0.10, 38, 0, false);
 
-# ==============================================================================
-# BARRA LATERAL — CONTROLES DO MOTOR ANALÍTICO (RAY CASTING)
-# ==============================================================================
-with st.sidebar:
-    st.title("🏛️ Bloco 734 — CT/UFC")
-    st.caption("Motor Ray Casting Vetorizado + Campus Interativo 3D")
+  // Bloco 734
+  addBox(22, 6.6, 33, matAlvenaria, 48, 3.3, 36.5);
+  addBox(22, 6.6, 11, matAlvenaria, 26, 3.3, 47.5);
+  const arcMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(22, 22, 6.6, 48, 1, false, Math.PI, Math.PI * 0.5),
+    matAlvenaria
+  );
+  arcMesh.position.set(37, 3.3, 42);
+  arcMesh.castShadow = true;
+  arcMesh.receiveShadow = true;
+  scene.add(arcMesh);
 
-    preset_keys = {
-        "principal": "Perspectiva Principal (Bloco 734 & Fonte)",
-        "obliqua": "Projeção Oblíqua (Gabinete 45° Elevada)",
-        "isometrica": "Projeção Ortográfica / Isométrica",
-        "1_ponto_fuga": "1 Ponto de Fuga (Eixo Frontal)",
-        "2_pontos_fuga": "2 Pontos de Fuga (Horizontal)",
-        "3_pontos_fuga": "3 Pontos de Fuga (Plongée Aéreo)",
-        "zoom_in": "Zoom In (Escultura & Cáusticas)",
-        "zoom_out": "Zoom Out (Vista Geral CT)",
+  // Painéis Fotovoltaicos na Cobertura (Y = 6.60m) + Balizador IoT de Borda
+  [29.0, 34.0].forEach((zf) => {
+    const painel = new THREE.Mesh(new THREE.BoxGeometry(11.0, 0.12, 2.2), matSolar);
+    painel.position.set(48.0, 7.05, zf);
+    painel.rotation.x = THREE.MathUtils.degToRad(22);
+    painel.castShadow = true;
+    scene.add(painel);
+
+    const moldura = new THREE.Mesh(new THREE.BoxGeometry(11.15, 0.08, 2.32), matAcoBranco);
+    moldura.position.set(48.0, 6.98, zf);
+    moldura.rotation.x = THREE.MathUtils.degToRad(22);
+    scene.add(moldura);
+  });
+  registrarAR(
+    'Usina Fotovoltaica (Cobertura Bloco 734)',
+    'ENERGIA SOLAR • PONTO DE FOTO TÉCNICA [P]',
+    'Arranjo de módulos fotovoltaicos monocristalinos inclinados a 22° na cobertura. Enquadre e aperte [P]!',
+    'Malha Poligonal · T(48, 7.02, 31.5) · Rx(22°)',
+    [48.0, 7.05, 31.5], [11.2, 1.2, 7.4]
+  );
+
+  const iotBeacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0xea580c, emissiveIntensity: 0.9 })
+  );
+  iotBeacon.position.set(38.5, 6.88, 21.2);
+  scene.add(iotBeacon);
+  registrarAR(
+    'Balizador IoT de Borda (Telhado)',
+    'SENSOR IoT • MONITORAMENTO DE QUEDA',
+    'Sensor perimetral que emite alerta sonoro e visual quando o explorador se aproxima da beirada da laje.',
+    'Esfera IoT · T(38.5, 6.88, 21.2)',
+    [38.5, 6.88, 21.2], [1.2, 1.2, 1.2]
+  );
+
+  // Placa 734
+  const pCanvas = document.createElement('canvas');
+  pCanvas.width = 256; pCanvas.height = 96;
+  const pCtx = pCanvas.getContext('2d');
+  pCtx.fillStyle = '#f8fafc'; pCtx.fillRect(0, 0, 256, 96);
+  pCtx.strokeStyle = '#1e293b'; pCtx.lineWidth = 6; pCtx.strokeRect(3, 3, 250, 90);
+  pCtx.fillStyle = '#0f172a'; pCtx.font = 'bold 62px sans-serif';
+  pCtx.textAlign = 'center'; pCtx.textBaseline = 'middle';
+  pCtx.fillText('734', 128, 52);
+  const angPlaca = 0.14 * (Math.PI / 2);
+  const placaMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(3.4, 1.15, 0.18),
+    new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(pCanvas) })
+  );
+  placaMesh.position.set(37 - 22.08 * Math.cos(angPlaca), 5.72, 42 - 22.08 * Math.sin(angPlaca));
+  placaMesh.rotation.y = Math.PI / 2 - angPlaca;
+  scene.add(placaMesh);
+
+  registrarAR(
+    'Bloco 734 (CT / UFC)',
+    'EDIFICAÇÃO PRINCIPAL • CSG ANALÍTICO',
+    'Edifício sede com fachada arqueada tangencial (R=22m, H=6.6m), 9 janelas quebráveis [F] e platibanda nº 734.',
+    'Primitivas: Prisma + Cilindro R=22m • Primeiro Octante',
+    [37, 3.3, 36.5], [44, 6.8, 33]
+  );
+
+  // Janelas Quebráveis + Derramamento de Asfalto + Poças Ativas (acionam Vigilantes!)
+  const breakableWindows = [];
+  const asphaltSpills = [];
+  const activePuddles = [];
+  const particles = [];
+  const matAsfaltoLiquido = new THREE.MeshStandardMaterial({ color: 0x090b10, roughness: 0.18, metalness: 0.35 });
+
+  function criarJanelaCurva(nome, sArco, yCentro, larg, alt) {
+    const ang = sArco * (Math.PI / 2);
+    const r = 22.06;
+    const wx = 37 - r * Math.cos(ang);
+    const wz = 42 - r * Math.sin(ang);
+    const rotY = Math.PI / 2 - ang;
+
+    const grp = new THREE.Group();
+    grp.position.set(wx, yCentro, wz);
+    grp.rotation.y = rotY;
+
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(larg + 0.18, alt + 0.18, 0.12), matEsquadria);
+    const glassMat = matVidro.clone();
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(larg, alt, 0.16), glassMat);
+    const hpBarBg = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.14, 0.05), new THREE.MeshBasicMaterial({ color: 0x0f172a }));
+    hpBarBg.position.set(0, alt * 0.5 + 0.32, 0.12);
+    hpBarBg.visible = false;
+    const hpBarFill = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.10, 0.06), new THREE.MeshBasicMaterial({ color: 0x22c55e }));
+    hpBarFill.position.set(0, alt * 0.5 + 0.32, 0.13);
+    hpBarFill.visible = false;
+
+    grp.add(frame, glass, hpBarBg, hpBarFill);
+    scene.add(grp);
+
+    breakableWindows.push({
+      nome, grp, glass, glassMat, hpBarBg, hpBarFill,
+      pos: new THREE.Vector3(wx, yCentro, wz),
+      normal: new THREE.Vector3(-Math.cos(ang), 0, -Math.sin(ang)),
+      rotY, larg, alt, hp: 3, maxHp: 3, broken: false, hideBarTimer: 0
+    });
+  }
+
+  criarJanelaCurva('Porta Principal de Vidro (Bloco 734)', 0.13, 1.48, 2.5, 2.55);
+  for (let i = 0; i < 9; i++) {
+    const sMid = 0.24 + ((i + 0.5) / 9.0) * 0.72;
+    criarJanelaCurva(`Janela Fachada Curva #${i + 1}`, sMid, 2.30, 1.75, 1.88);
+  }
+
+  function dispararDerramamentoAsfalto(winObj) {
+    const basePos = winObj.pos.clone().addScaledVector(winObj.normal, 0.16);
+    const streamMesh = new THREE.Mesh(new THREE.BoxGeometry(winObj.larg * 0.82, 0.1, 0.18), matAsfaltoLiquido);
+    streamMesh.position.set(basePos.x, winObj.pos.y - winObj.alt * 0.35, basePos.z);
+    streamMesh.rotation.y = winObj.rotY;
+    scene.add(streamMesh);
+
+    const puddlePos = winObj.pos.clone().addScaledVector(winObj.normal, 1.15);
+    const puddleMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.04, 24), matAsfaltoLiquido);
+    puddleMesh.position.set(puddlePos.x, 0.22, puddlePos.z);
+    scene.add(puddleMesh);
+
+    asphaltSpills.push({ streamMesh, puddleMesh, topY: winObj.pos.y - winObj.alt * 0.35, progress: 0.0 });
+    activePuddles.push({ x: puddlePos.x, z: puddlePos.z, r: 1.35 });
+  }
+
+  function spawnParticulas(pos, coresHex, qtd = 20, spread = 5.0) {
+    const geo = new THREE.BoxGeometry(0.14, 0.14, 0.06);
+    for (let i = 0; i < qtd; i++) {
+      const cor = Array.isArray(coresHex) ? coresHex[i % coresHex.length] : coresHex;
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: cor }));
+      m.position.copy(pos).add(new THREE.Vector3((Math.random()-0.5)*1.2, (Math.random()-0.5)*1.0, (Math.random()-0.5)*0.8));
+      scene.add(m);
+      particles.push({
+        mesh: m,
+        vel: new THREE.Vector3((Math.random()-0.5)*spread, Math.random()*4.5 + 1.8, (Math.random()-0.5)*spread),
+        life: 1.6
+      });
     }
-    preset_escolhido = st.selectbox(
-        "Preset de Câmera & Projeção:",
-        options=list(preset_keys.keys()),
-        format_func=lambda k: preset_keys[k],
-        index=0,
-    )
+  }
 
-    resolucao = st.select_slider(
-        "Resolução Ray Casting (Quest 13):",
-        options=[250, 350, 500],
-        value=500,
-    )
+  // Fonte Frontal
+  addBox(15.3, 0.34, 0.28, matGranito, 27.0, 0.37, 16.8);
+  addBox(15.3, 0.34, 0.28, matGranito, 27.0, 0.37, 22.8);
+  addBox(0.28, 0.34, 6.0, matGranito, 19.5, 0.37, 19.8);
+  addBox(0.28, 0.34, 6.0, matGranito, 34.5, 0.37, 19.8);
+  const aguaMesh = addBox(14.85, 0.08, 5.85, matAgua, 27.0, 0.38, 19.8, 0, false);
 
-    col_l1, col_l2 = st.columns(2)
-    with col_l1:
-        modo_noite = st.toggle("Modo Noturno", value=False)
-        ativar_sol = st.toggle("Sol Direcional", value=True)
-        ativar_spots = st.toggle("Spots & Holofotes", value=True)
-    with col_l2:
-        ativar_sombras = st.toggle("Sombras Projetadas", value=True)
-        ativar_reflexos = st.toggle("Reflexos (1 Bounce)", value=True)
-        ativar_caustics = st.toggle("Cáusticas da Fonte", value=True)
+  registrarAR(
+    "Espelho d'Água (Fonte Cáustica)",
+    "REFRAÇÃO n=1.333 • PATRIMÔNIO PROTEGIDO",
+    "Lâmina d'água com 3 spots submersos. Saltar do telhado na fonte amortece a queda, mas demorar dentro dela aciona os Vigilantes!",
+    "Cubos + Esferas • Textura Ondulatória",
+    [27.0, 0.42, 19.8], [15.4, 0.6, 6.2]
+  );
 
-    ssaa = st.toggle("Anti-Aliasing SSAA 2x", value=False)
+  // Escultura Cinética (5 Losangos)
+  const escGrp = new THREE.Group();
+  escGrp.position.set(15.0, 0.2, 22.0);
+  escGrp.rotation.y = THREE.MathUtils.degToRad(-24);
+  const baseEsc = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.28, 3.4), matConcreto);
+  baseEsc.position.y = 0.14;
+  escGrp.add(baseEsc);
+  for (let k = 0; k < 5; k++) {
+    const fc = k - 2;
+    const Lk = 2.35 * (1.0 - 0.055 * fc);
+    const rk = Lk / Math.sqrt(2);
+    const qGrp = new THREE.Group();
+    qGrp.position.set(fc * 0.22, 0.28 + rk + 0.05, -1.16 + k * 0.58);
+    qGrp.rotation.z = Math.PI / 4;
+    const esp = 0.14, prof = 0.16;
+    [
+      [Lk + esp, esp, 0, Lk/2], [Lk + esp, esp, 0, -Lk/2],
+      [esp, Lk + esp, Lk/2, 0], [esp, Lk + esp, -Lk/2, 0]
+    ].forEach(([w, h, bx, by]) => {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, prof), matAcoBranco);
+      b.position.set(bx, by, 0);
+      b.castShadow = true;
+      qGrp.add(b);
+    });
+    escGrp.add(qGrp);
+  }
+  scene.add(escGrp);
+  registrarAR(
+    "Escultura Cinética em Aço",
+    "COMPOSIÇÃO PARAMÉTRICA • OBRA PROTEGIDA",
+    "Cinco quadros metálicos rotacionados a 45° e -24° em Y. Aproximar-se demais da obra aciona a Vigilância Patrimonial!",
+    "Translação · Rotação Z(45°) & Y(-24°) · Escala",
+    [15.0, 2.0, 22.0], [3.6, 3.8, 3.8]
+  );
 
-    st.divider()
-    st.markdown(
-        """
-        **Guia Rápido de Camadas:**
-        - **📸 Foto `[P]`**: Inclui ponto técnico nos **Painéis Fotovoltaicos** (telhado).
-        - **🧗 Escalar `[E]`**: Árvores, Postes e Escada lateral (equilíbrio `A/D`).
-        - **📡 IoT**: Alerta na beirada do telhado e na faixa de veículos.
-        - **👮 Vigilância**: Fonte, Escultura e asfalto das janelas acionam vigilantes (fuja para o alto!).
-        - **🐕 Cachorro**: Patrulha o gramado oeste e avança ao invadir sua área.
-        - **🎓 Rep. Prof. Creto `[F]`**: 4 perguntas de CG (seno/cosseno nos quadrantes).
-        """
-    )
+  // Escada Telhado
+  addBox(0.55, 6.6, 1.1, matEsquadria, 59.35, 3.4, 24.0);
+  for (let deg = 0.6; deg <= 6.4; deg += 0.45) {
+    addBox(0.65, 0.06, 0.95, matMetalGalv, 59.35, deg, 24.0);
+  }
+  registrarAR(
+    "Escada de Acesso ao Telhado",
+    "TRANSPORTE VERTICAL • Y=0.2m → Y=6.8m",
+    "Escada lateral (X=59.35, Z=24.0). Pressione [E] para escalar com [W/S] ou suba diretamente!",
+    "Cubos Escalonados",
+    [59.35, 3.4, 24.0], [1.2, 6.8, 1.5]
+  );
 
-motor = obter_motor(resolucao, resolucao)
-cfg_atual = motor.presets[preset_escolhido]
+  // Árvores Escaláveis + Ave Predadora
+  const arvoresCoords = [
+    { nome: "Árvore Bosque Esq.", x: 10.5, z: 28.5, h: 4.5, esc: 1.15, temCoruja: false },
+    { nome: "Árvore Fundo Esq.", x: 11.5, z: 38.0, h: 4.9, esc: 1.25, temCoruja: true },
+    { nome: "Árvore Praça Dir.", x: 37.5, z: 17.5, h: 3.8, esc: 0.90, temCoruja: false }
+  ];
+  arvoresCoords.forEach((arv) => {
+    const tMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.28 * arv.esc, 0.42 * arv.esc, 3.2 * arv.esc, 12), matTronco);
+    tMesh.position.set(arv.x, 0.2 + 1.6 * arv.esc, arv.z);
+    tMesh.castShadow = true;
+    scene.add(tMesh);
+    [[0, 3.6, 0, 1.65, matFolha1], [-1.1, 3.2, 0.6, 1.25, matFolha2], [1.1, 3.3, -0.5, 1.30, matFolha2], [0.3, 4.5, 0.4, 1.20, matFolha1]].forEach(([ox, oy, oz, r, m]) => {
+      const cMesh = new THREE.Mesh(new THREE.SphereGeometry(r * arv.esc, 14, 12), m);
+      cMesh.position.set(arv.x + ox * arv.esc, oy * arv.esc, arv.z + oz * arv.esc);
+      cMesh.castShadow = true;
+      scene.add(cMesh);
+    });
+    registrarAR(arv.nome, "VEGETAÇÃO ESCALÁVEL [E] • FUGA VERTICAL", "Pressione [E] para escalar (equilibre com A/D!) e escapar dos Vigilantes ou do Cachorro!", "Cilindro + Esferas (Quatérnios)", [arv.x, 2.8 * arv.esc, arv.z], [3.4 * arv.esc, 5.4 * arv.esc, 3.4 * arv.esc], { climbable: { tipo: 'arvore', nome: arv.nome, x: arv.x, z: arv.z, maxH: arv.h, coruja: arv.temCoruja } });
+  });
 
-# ==============================================================================
-# ABAS PRINCIPAIS: JOGO 3D INTERATIVO vs MOTOR RAY CASTING ANALÍTICO
-# ==============================================================================
-tab_jogo, tab_ray = st.tabs([
-    "🎮 Campus CT 3D Interativo (Mini-Quests, IoT, Vigilância & Quiz Creto)",
-    "🔬 Motor Ray Casting Analítico (motor_ct.py) & Auditoria",
-])
+  // Ave Predadora / Coruja (X=11.5, Z=38.0)
+  const aveGrp = new THREE.Group();
+  const aveHome = new THREE.Vector3(11.5, 5.3, 38.0);
+  aveGrp.position.copy(aveHome);
+  const matAve = new THREE.MeshStandardMaterial({ color: 0x312e81, roughness: 0.5 });
+  const aveCorpo = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.1, 10), matAve);
+  aveCorpo.rotation.x = Math.PI / 2;
+  const asaE = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 0.45), matAve); asaE.position.x = -0.65;
+  const asaD = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 0.45), matAve); asaD.position.x = 0.65;
+  aveGrp.add(aveCorpo, asaE, asaD);
+  scene.add(aveGrp);
+  let birdScareCooldown = 0;
 
-with tab_jogo:
-    components.html(JOGO_3D_HTML, height=740, scrolling=False)
+  // Cones + Abrigo Cisalhado + Postes Escaláveis
+  [[35.3, 16.2], [35.9, 15.6], [36.5, 16.9], [37.1, 16.3]].forEach(([cx, cz]) => {
+    const c = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.95, 14), matCone);
+    c.position.set(cx, 0.2 + 0.475, cz);
+    c.castShadow = true;
+    scene.add(c);
+  });
 
-with tab_ray:
-    col_render, col_info = st.columns([1.35, 1.0])
+  const abrigoMesh = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.16, 3.2), matMetalGalv);
+  abrigoMesh.position.set(46.8, 2.6, 18.8);
+  abrigoMesh.rotation.z = -0.09;
+  abrigoMesh.castShadow = true;
+  scene.add(abrigoMesh);
+  [[44.7, 17.4], [48.8, 17.4], [44.7, 20.2], [48.8, 20.2]].forEach(([px, pz]) => {
+    const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.4, 10), matEsquadria);
+    pil.position.set(px, 1.4, pz);
+    scene.add(pil);
+  });
 
-    with col_render:
-        t0 = time.perf_counter()
-        img_arr, legenda = motor.renderizar_config(
-            cfg_atual,
-            modo_noite=modo_noite,
-            ativar_caustics=ativar_caustics,
-            ativar_reflexos=ativar_reflexos,
-            ativar_sombras=ativar_sombras,
-            ativar_sol=ativar_sol,
-            ativar_spots=ativar_spots,
-            ssaa=ssaa,
-        )
-        dt_ms = (time.perf_counter() - t0) * 1000.0
-        st.image(
-            np.clip(img_arr, 0.0, 1.0),
-            caption=f"{legenda} • Tempo: {dt_ms:.1f} ms",
-            use_container_width=True,
-        )
+  const postesData = [
+    { nome: 'Poste #1', x: 9.5, z: 21.0, ox: 0.6, h: 5.8 },
+    { nome: 'Poste #2', x: 18.5, z: 16.2, ox: 0.4, h: 5.8 },
+    { nome: 'Poste #3', x: 41.0, z: 16.5, ox: 0.0, h: 5.8 },
+    { nome: 'Poste #4', x: 54.5, z: 17.5, ox: -0.5, h: 5.8 }
+  ];
+  postesData.forEach((pt) => {
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.14, 6.2, 10), matEsquadria);
+    p.position.set(pt.x, 3.3, pt.z);
+    scene.add(p);
+    const lum = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 12), new THREE.MeshBasicMaterial({ color: 0xfef08a }));
+    lum.position.set(pt.x + pt.ox, 6.3, pt.z + 0.4);
+    scene.add(lum);
+    registrarAR(pt.nome, "POSTE ESCALÁVEL [E] • FUGA VERTICAL", "Pressione [E] para escalar o poste (equilibre com A/D!) e concluir a mini-quest.", "Cilindro + Esfera Emissiva", [pt.x, 3.2, pt.z], [1.4, 6.2, 1.4], { climbable: { tipo: 'poste', nome: pt.nome, x: pt.x, z: pt.z, maxH: pt.h } });
+  });
 
-    with col_info:
-        st.subheader("🎯 Quest 12 — Picking Analítico O(1)")
-        p_col1, p_col2 = st.columns(2)
-        with p_col1:
-            px = st.slider("Pixel X", 0, resolucao - 1, resolucao // 2)
-        with p_col2:
-            py = st.slider("Pixel Y", 0, resolucao - 1, resolucao // 2)
+  // ============================================================================
+  // 5. CARROS ANIMADOS NA VIA CT + CACHORRO GUARDIÃO + VIGILANTES + REP. CRETO
+  // ============================================================================
+  const animatedCars = [];
+  function criarVeiculoAnimado(nome, xInit, zLane, dirX, speed, corHex) {
+    const grp = new THREE.Group();
+    grp.position.set(xInit, 0.1, zLane);
+    grp.rotation.y = dirX > 0 ? Math.PI / 2 : -Math.PI / 2;
 
-        hit_info = motor.consultar_pick_buffer(px, py)
-        if hit_info["hit"]:
-            st.success(f"**Objeto Atingido:** {hit_info['nome']}")
-            st.markdown(
-                f"""
-                - **Primitiva:** `{hit_info['tipo_primitiva']}` ({hit_info['grupo']})
-                - **Material:** `{hit_info['material']}` (Refletividade: `{hit_info['refletividade']}`)
-                - **Distância ($t$):** `{hit_info['distancia']:.2f} m`
-                - **Ponto Mundo ($P$):** `{hit_info['ponto_world']}`
-                - **Normal ($N$):** `{hit_info['normal_world']}`
-                - **Transformação:** `{hit_info['transformacao']}`
-                - **Descrição:** {hit_info['descricao']}
-                """
-            )
-        else:
-            st.info(f"**{hit_info['nome']}** — {hit_info['descricao']}")
+    const matCarro = new THREE.MeshStandardMaterial({ color: corHex, metalness: 0.4, roughness: 0.25 });
+    const matPneu = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.9 });
+    const chassi = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.65, 4.3), matCarro);
+    chassi.position.y = 0.55; chassi.castShadow = true;
+    const cabine = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.54, 2.2), matVidro);
+    cabine.position.set(0, 1.12, -0.15);
+    grp.add(chassi, cabine);
 
-        st.divider()
-        st.subheader("📜 Auditoria das Quests (Atos I a VIII)")
-        status = motor.obter_status_quests(
-            cfg_atual,
-            resolucao,
-            ativar_sombras=ativar_sombras,
-            ativar_sol=ativar_sol,
-            ativar_spots=ativar_spots,
-        )
-        for ato in status.values():
-            with st.expander(ato["titulo"], expanded=False):
-                for titulo_q, ok, pts in ato["items"]:
-                    icone = "✅" if ok else "⚠️"
-                    st.write(f"{icone} **{titulo_q}** (`{pts}`)")
+    const rodas = [];
+    [[-1.02, 0.36, 1.35], [1.02, 0.36, 1.35], [-1.02, 0.36, -1.35], [1.02, 0.36, -1.35]].forEach(([rx, ry, rz]) => {
+      const roda = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.22, 12), matPneu);
+      roda.rotation.z = Math.PI / 2;
+      roda.position.
