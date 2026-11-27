@@ -167,8 +167,8 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     border: 1px solid #1e293b;
   }
   @media (max-width: 900px), (pointer: coarse), (any-pointer: coarse) {
-      #xbox-sticks { display: block !important; }
-  }
+    #game-wrapper { height: 560px; }
+    #xbox-sticks { display: block !important; }
   }
   #game-wrapper.pseudo-fullscreen {
     position: fixed !important; inset: 0 !important;
@@ -177,6 +177,69 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   }
   canvas { display: block; width: 100%; height: 100%; cursor: grab; outline: none; }
   canvas:active { cursor: grabbing; }
+
+  /* TELA INICIAL ARCADE START */
+  #arcade-start-overlay {
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at top, rgba(37, 99, 235, 0.28), rgba(2, 6, 23, 0.94) 72%);
+    backdrop-filter: blur(8px);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 48; padding: 20px; text-align: center; color: #f8fafc;
+  }
+  .arcade-card {
+    background: rgba(15, 23, 42, 0.92);
+    border: 1px solid rgba(56, 189, 248, 0.55);
+    border-radius: 18px; padding: 24px 28px;
+    width: min(460px, 92vw);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.75);
+  }
+  .arcade-badge {
+    display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 1px;
+    color: #38bdf8; background: rgba(56, 189, 248, 0.14);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    padding: 3px 10px; border-radius: 999px; margin-bottom: 10px;
+  }
+  .arcade-title { font-size: 24px; font-weight: 900; margin-bottom: 6px; }
+  .arcade-sub { font-size: 12.5px; color: #cbd5e1; margin-bottom: 16px; line-height: 1.45; }
+  .arcade-input {
+    width: 100%; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid #334155; background: #020617; color: #f8fafc;
+    font-size: 13px; margin-bottom: 14px; outline: none; user-select: text;
+  }
+  .arcade-input:focus { border-color: #38bdf8; }
+  #btn-arcade-start {
+    width: 100%; padding: 12px 18px; border-radius: 12px;
+    border: 1px solid #93c5fd;
+    background: linear-gradient(135deg, #2563eb, #0284c7);
+    color: #ffffff; font-size: 15px; font-weight: 900; letter-spacing: 0.8px;
+    cursor: pointer; transition: transform 0.15s, filter 0.15s;
+    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.45);
+  }
+  #btn-arcade-start:hover { transform: translateY(-1px); filter: brightness(1.08); }
+
+  /* TELA RESUMO AO ENCERRAR */
+  #summary-modal {
+    position: absolute; inset: 0;
+    background: rgba(2, 6, 23, 0.92);
+    backdrop-filter: blur(8px);
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 49; padding: 18px; color: #f8fafc;
+  }
+  .summary-card {
+    background: #0f172a; border: 1px solid #38bdf8; border-radius: 16px;
+    padding: 20px 24px; width: min(560px, 94vw); max-height: 92%; overflow-y: auto;
+    box-shadow: 0 20px 55px rgba(0, 0, 0, 0.8);
+  }
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px; margin: 12px 0;
+  }
+  .summary-box {
+    background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+    padding: 10px; text-align: center;
+  }
+  .summary-box b { display: block; font-size: 16px; color: #38bdf8; margin-top: 2px; }
+  .summary-box span { font-size: 11px; color: #cbd5e1; }
 
   /* HUD SUPERIOR ESQUERDO */
   #hud-top-left {
@@ -451,9 +514,57 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   <div id="damage-flash"></div>
   <div id="flash-screen"></div>
 
+  <!-- TELA INICIAL ARCADE START -->
+  <div id="arcade-start-overlay">
+    <div class="arcade-card">
+      <div class="arcade-badge">🕹️ BLOCO 734 • CT / UFC</div>
+      <div class="arcade-title">CAMPUS 3D INTERATIVO</div>
+      <div class="arcade-sub">
+        Explore o Bloco 734, colete entregas, fotografe alvos técnicos, enfrente o Quiz do Prof. Creto e acompanhe seu tempo de sessão.
+      </div>
+      <input
+        id="player-email-input"
+        class="arcade-input"
+        type="email"
+        placeholder="Seu e-mail (opcional — salvo no resumo da sessão)"
+      />
+      <button id="btn-arcade-start">▶ START</button>
+    </div>
+  </div>
+
+  <!-- TELA RESUMO AO ENCERRAR -->
+  <div id="summary-modal">
+    <div class="summary-card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="color:#38bdf8; font-size:18px;">🏁 Resumo da Experiência — Bloco 734</h3>
+        <button class="hud-btn" id="btn-close-summary">▶ Continuar</button>
+      </div>
+      <p style="font-size:12.5px; color:#cbd5e1; margin-top:6px;">
+        Obrigado por explorar o <b>Bloco 734 (CT/UFC)</b>! Aqui está o registro consolidado da sua sessão:
+      </p>
+      <div class="summary-grid">
+        <div class="summary-box"><span>⏱️ Tempo Cronometrado</span><b id="sum-time">00:00</b></div>
+        <div class="summary-box"><span>🎒 Inventário</span><b id="sum-inv">0/8</b></div>
+        <div class="summary-box"><span>📸 Fotos Registradas</span><b id="sum-photos">0/5</b></div>
+        <div class="summary-box"><span>🎓 Acertos (Creto)</span><b id="sum-creto">0/4</b></div>
+        <div class="summary-box"><span>🪟 Vidros Quebrados</span><b id="sum-windows">0/10</b></div>
+        <div class="summary-box"><span>🧭 Mini-Quests</span><b id="sum-mini">0/5</b></div>
+      </div>
+      <div id="sum-email-box" style="font-size:12px; color:#93c5fd; background:#1e293b; border:1px solid #334155; border-radius:8px; padding:10px; margin-bottom:12px;">
+        📧 E-mail: <b id="sum-email-val">Não informado</b>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;">
+        <a id="btn-mailto-summary" class="hud-btn" style="text-decoration:none; display:none;" target="_blank">✉️ Preparar E-mail</a>
+        <button class="hud-btn" id="btn-restart-session" style="background:#16a34a; border-color:#86efac;">🔄 Nova Sessão (START)</button>
+      </div>
+    </div>
+  </div>
+
   <!-- HUD SUPERIOR ESQUERDO -->
   <div id="hud-top-left">
     <div class="hud-pill">
+      <span>⏱️ <b id="timer-badge" style="color:#38bdf8;">00:00</b></span>
+      <span>•</span>
       <span>❤️ Life</span>
       <div class="bar-bg"><div id="energy-fill"></div></div>
       <span id="hp-text" style="font-size:11.5px; color:#cbd5e1;">100%</span>
@@ -479,6 +590,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     <button class="hud-btn" id="btn-survival">💀 Sobrevivência: OFF</button>
     <button class="hud-btn" id="btn-audio">🔊 Som: ON</button>
     <button class="hud-btn" id="btn-quests">📜 Inventário & Quests (Q)</button>
+    <button class="hud-btn" id="btn-summary" style="border-color:#f59e0b; color:#fde68a;">🏁 Resumo / Sair</button>
     <button class="hud-btn" id="btn-fullscreen">⛶ Tela Cheia</button>
   </div>
 
@@ -487,7 +599,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
 
   <!-- BARRA DE EQUILÍBRIO NA ESCALADA (ÁRVORE & POSTE) -->
   <div id="climb-hud">
-    <div style="font-size:12px; font-weight:700; color:#7dd3fc;" id="climb-label">🧗 Escalando! [W/S] subir/descer • [A/D] equilibrar • [R] soltar</div>
+    <div style="font-size:12px; font-weight:700; color:#7dd3fc;" id="climb-label">🧗 Escalando! [W/S] ou Analógico Esq. subir/descer • [A/D] equilibrar • [R] soltar</div>
     <div class="balance-track"><div id="balance-needle"></div></div>
   </div>
 
@@ -496,7 +608,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     <div class="viewfinder-box">
       <div style="display:flex; justify-content:space-between; font-weight:700; font-size:13.5px; color:#6ee7b7; text-shadow:0 2px 6px #000;">
         <span>[REC ●] MODO FOTO TÉCNICA CT</span>
-        <span id="photo-target-hint">Aponte para um alvo e pressione [P] para fotografar</span>
+        <span id="photo-target-hint">Aponte para um alvo e pressione [P] para registrar e sair</span>
       </div>
       <div style="text-align:center; font-size:28px; color:#6ee7b7; opacity:0.8;">✛</div>
       <div style="text-align:center; font-size:12px; color:#e2e8f0; text-shadow:0 1px 4px #000;">
@@ -639,12 +751,11 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       <div class="modal-body" id="tab-help" style="display:none;">
         <div class="act-block">
           <h4>🎮 Controles Unificados</h4>
-          <p>• <b>W A S D / Setas:</b> Caminhar (encoste na <b>Escada Lateral X=59.35, Z=24</b> e segure <b>W</b> para subir direto ao telhado!).<br/>
-             • <b>Arrastar Mouse / Roda:</b> Girar câmera 360° e aplicar Zoom.<br/>
-             • <b>[E] Interagir:</b> Coleta itens das mesas, fala com <b>Prof. Creto</b> (placa flutuante na área lateral X=9.5, Z=22.2), toma café na ilha (X=35.8, Z=18.8), aciona Totens 3D ou inspeciona monumentos.<br/>
-             • <b>[R] Escalar Árvore/Poste:</b> Sobe em árvores ou postes de iluminação (equilibre com <b>A/D</b> e solte com <b>R</b> ou <b>Espaço</b>).<br/>
-             • <b>[P] Modo Foto:</b> Abre o visor e registra fotos técnicas (Painéis Solares, Pássaro CT, Escultura, etc.).<br/>
-             • <b>Falar com Prof. Creto:</b> Vá até o personagem Prof. Creto na área lateral (X=9.5, Z=22.2) e pressione <b>[E]</b> ou clique nele para abrir o quiz.<br/>
+          <p>• <b>W A S D / Setas / Analógico Esq.:</b> Caminhar (encoste na <b>Escada Lateral X=59.35, Z=24</b> e suba direto ao telhado!).<br/>
+             • <b>Arrastar Mouse / Roda / Analógico Dir.:</b> Girar câmera 360° e aplicar Zoom.<br/>
+             • <b>[E] Interagir:</b> Coleta itens das mesas, fala com <b>Prof. Creto</b> (X=9.5, Z=22.2), toma café na ilha (X=35.8, Z=18.8), aciona Totens 3D ou inspeciona monumentos.<br/>
+             • <b>[R] Escalar Árvore/Poste:</b> Sobe em árvores ou postes (no celular, use o <b>Analógico Esquerdo</b> para subir/descer e equilibrar; no PC use <b>W/S</b> e <b>A/D</b>; solte com <b>R</b> ou <b>Espaço</b>).<br/>
+             • <b>[P] Modo Foto:</b> Primeiro <b>[P]</b> abre o visor; segundo <b>[P]</b> registra a foto e encerra o modo foto.<br/>
              • <b>[F] Atacar:</b> Quebra as janelas curvas do Bloco 734.<br/>
              • <b>[C] Comemorar:</b> Executa dança comemorativa.<br/>
              • <b>[Q] Inventário & Quests:</b> Pausa o jogo e exibe progresso.</p>
@@ -665,8 +776,9 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
 
   const wrapper = document.getElementById('game-wrapper');
   const canvas = document.getElementById('c');
-  canvas.focus();
-  wrapper.addEventListener('mouseenter', () => canvas.focus());
+  wrapper.addEventListener('mouseenter', () => {
+    if (gameStarted && !isPaused && !inQuizModal && !inSummaryModal) canvas.focus();
+  });
 
   // ============================================================================
   // 1. MOTOR DE ÁUDIO PROCEDURAL (WEB AUDIO API)
@@ -1146,7 +1258,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       coruja.position.set(arv.x, 0.2 + 5.1 * arv.esc, arv.z);
       scene.add(coruja);
     }
-    registrarAR(arv.nome, "ESCALÁVEL [R] • REFÚGIO CONTRA VIGILANTES", "Pressione [R] próximo ao tronco para escalar usando W/S e equilibrando com A/D!", "Cilindro + Esferas (Quatérnios)", [arv.x, 2.8 * arv.esc, arv.z], [3.4 * arv.esc, 5.4 * arv.esc, 3.4 * arv.esc]);
+    registrarAR(arv.nome, "ESCALÁVEL [R] • REFÚGIO CONTRA VIGILANTES", "Pressione [R] próximo ao tronco para escalar usando W/S (ou Analógico Esq. no celular) e equilibrando com A/D!", "Cilindro + Esferas (Quatérnios)", [arv.x, 2.8 * arv.esc, arv.z], [3.4 * arv.esc, 5.4 * arv.esc, 3.4 * arv.esc]);
   });
 
   const arbustosPos = [
@@ -1414,7 +1526,11 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
 
   let quizDeck = [];
   let quizIdx = 0;
+  let gameStarted = false;
+  let sessionSeconds = 0;
+  let playerEmail = "";
   let inQuizModal = false;
+  let inSummaryModal = false;
   let isPaused = false;
   let survivalMode = false;
   let isDead = false;
@@ -1454,7 +1570,15 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     }
   };
 
+  function formatarTempo(seg) {
+    const total = Math.max(0, Math.floor(seg));
+    const mm = String(Math.floor(total / 60)).padStart(2, '0');
+    const ss = String(total % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  }
+
   function atualizarHUD() {
+    document.getElementById('timer-badge').textContent = formatarTempo(sessionSeconds);
     const pct = Math.max(0, Math.min(100, Math.round(energy)));
     const fill = document.getElementById('energy-fill');
     fill.style.width = `${pct}%`;
@@ -1492,6 +1616,84 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     setBadge('mq-rua', pState.quests.travessia);
     setBadge('mq-creto', pState.quests.cretoAcertos >= 4);
   }
+
+  function abrirResumoSessao() {
+    const invCount = collectibles.filter(c => c.coletado).length;
+    const miniDone = [
+      pState.quests.fotos.size >= 3,
+      pState.quests.arvore,
+      pState.quests.poste,
+      pState.quests.predioSolar,
+      pState.quests.travessia
+    ].filter(Boolean).length;
+
+    const tempoStr = formatarTempo(sessionSeconds);
+    document.getElementById('sum-time').textContent = tempoStr;
+    document.getElementById('sum-inv').textContent = `${invCount}/${collectibles.length}`;
+    document.getElementById('sum-photos').textContent = `${pState.quests.fotos.size}/5`;
+    document.getElementById('sum-creto').textContent = `${pState.quests.cretoAcertos}/4`;
+    document.getElementById('sum-windows').textContent = `${windowsBrokenCount}/${breakableWindows.length}`;
+    document.getElementById('sum-mini').textContent = `${miniDone}/5`;
+
+    const emailLimpo = (document.getElementById('player-email-input').value || playerEmail || '').trim();
+    playerEmail = emailLimpo;
+    document.getElementById('sum-email-val').textContent = emailLimpo || 'Não informado';
+
+    const mailBtn = document.getElementById('btn-mailto-summary');
+    if (emailLimpo) {
+      const corpo = encodeURIComponent(
+        `Resumo Bloco 734 (CT/UFC)\nTempo: ${tempoStr}\nInventário: ${invCount}/${collectibles.length}\nFotos: ${pState.quests.fotos.size}/5\nAcertos Creto: ${pState.quests.cretoAcertos}/4\nVidros quebrados: ${windowsBrokenCount}/${breakableWindows.length}\nMini-quests: ${miniDone}/5\n\nObrigado por jogar!`
+      );
+      mailBtn.href = `mailto:${encodeURIComponent(emailLimpo)}?subject=${encodeURIComponent('Resumo da Sessão — Bloco 734 (CT/UFC)')}&body=${corpo}`;
+      mailBtn.style.display = 'inline-block';
+    } else {
+      mailBtn.style.display = 'none';
+    }
+
+    inSummaryModal = true;
+    document.getElementById('summary-modal').style.display = 'flex';
+  }
+
+  function fecharResumoSessao() {
+    inSummaryModal = false;
+    document.getElementById('summary-modal').style.display = 'none';
+    if (gameStarted) canvas.focus();
+  }
+
+  document.getElementById('btn-arcade-start').addEventListener('click', () => {
+    SoundEngine.init();
+    playerEmail = (document.getElementById('player-email-input').value || '').trim();
+    gameStarted = true;
+    document.getElementById('arcade-start-overlay').style.display = 'none';
+    SoundEngine.playSwitch();
+    atualizarHUD();
+    canvas.focus();
+  });
+
+  document.getElementById('btn-summary').addEventListener('click', () => {
+    abrirResumoSessao();
+  });
+  document.getElementById('btn-close-summary').addEventListener('click', fecharResumoSessao);
+  document.getElementById('btn-restart-session').addEventListener('click', () => {
+    sessionSeconds = 0;
+    energy = 100;
+    windowsBrokenCount = 0;
+    pState.pos.set(24.0, 0.2, 15.2);
+    pState.velY = 0;
+    pState.wasOnRoof = false;
+    pState.climbing = null;
+    pState.quests.fotos.clear();
+    pState.quests.arvore = false;
+    pState.quests.poste = false;
+    pState.quests.predioSolar = false;
+    pState.quests.travessia = false;
+    pState.quests.cretoAcertos = 0;
+    collectibles.forEach(c => { c.coletado = false; c.mesh.visible = true; });
+    fecharResumoSessao();
+    gameStarted = false;
+    document.getElementById('arcade-start-overlay').style.display = 'flex';
+    atualizarHUD();
+  });
 
   function aplicarDano(qtd, motivo, isScare = false) {
     if (isDead || inCoffeeCutscene || pState.damageCooldown > 0) return;
@@ -1554,7 +1756,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   function responderCreto(escolha) {
     const item = quizDeck[quizIdx];
     const fb = document.getElementById('creto-feedback');
-    
 
     if (escolha === item.ans) {
       SoundEngine.playCollect();
@@ -2016,10 +2217,16 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   });
 
   let visorFotoAtivo = false;
-  function alternarVisorFoto() {
-    visorFotoAtivo = !visorFotoAtivo;
-    document.getElementById('photo-overlay').style.display = visorFotoAtivo ? 'block' : 'none';
-    if (visorFotoAtivo) verificarAlvoFotografico();
+  function abrirVisorFoto() {
+    visorFotoAtivo = true;
+    document.getElementById('photo-overlay').style.display = 'block';
+    verificarAlvoFotografico();
+    mostrarAlerta("📸 Visor aberto — pressione [P] novamente para tirar a foto e fechar!", "alert-info", 2200, "photo_mode");
+  }
+
+  function fecharVisorFoto() {
+    visorFotoAtivo = false;
+    document.getElementById('photo-overlay').style.display = 'none';
   }
 
   function verificarAlvoFotografico() {
@@ -2039,12 +2246,12 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       alvo = 'Prof. Creto na Praça do CT';
     }
     document.getElementById('photo-target-hint').textContent = alvo
-      ? `🎯 Enquadrado: ${alvo} — Pressione [P] para clicar!`
-      : 'Aproxime-se de um monumento, painel solar, pássaro ou Prof. Creto e clique [P]';
+      ? `🎯 Enquadrado: ${alvo} — Pressione [P] para registrar e sair`
+      : 'Aproxime-se de um alvo e pressione [P] para registrar e sair';
     return alvo;
   }
 
-  function tirarFoto() {
+  function tirarFotoEFechar() {
     SoundEngine.playPhoto();
     const flash = document.getElementById('flash-screen');
     flash.style.opacity = '0.92';
@@ -2055,13 +2262,18 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     if (alvo.includes('Fotovoltaicos')) {
       pState.quests.predioSolar = true;
     }
-    mostrarAlerta(`📸 Foto salva: "${alvo}" (${pState.quests.fotos.size}/5)!`, 'alert-success', 2600, 'success');
+    fecharVisorFoto();
+    mostrarAlerta(`📸 Foto salva & visor encerrado: "${alvo}" (${pState.quests.fotos.size}/5)!`, 'alert-success', 2600, 'success');
     atualizarHUD();
   }
 
+  function acionarTeclaFoto() {
+    if (!visorFotoAtivo) abrirVisorFoto();
+    else tirarFotoEFechar();
+  }
+
   document.getElementById('btn-photo').addEventListener('click', () => {
-    if (!visorFotoAtivo) alternarVisorFoto();
-    else tirarFoto();
+    acionarTeclaFoto();
     canvas.focus();
   });
 
@@ -2144,12 +2356,12 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
       wrapper.classList.remove('pseudo-fullscreen');
     }
-    canvas.focus();
+    if (gameStarted) canvas.focus();
   });
 
   const pauseModal = document.getElementById('pause-modal');
   function togglePauseModal(forceState = null) {
-    if (inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal) return;
+    if (!gameStarted || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal || inSummaryModal) return;
     isPaused = forceState !== null ? forceState : !isPaused;
     pauseModal.style.display = isPaused ? 'flex' : 'none';
     if (isPaused) atualizarHUD();
@@ -2174,6 +2386,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   let downX = 0, downY = 0;
 
   canvas.addEventListener('mousedown', (e) => {
+    if (!gameStarted) return;
     SoundEngine.init();
     canvas.focus();
     downX = e.clientX; downY = e.clientY;
@@ -2182,7 +2395,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
 
   window.addEventListener('mouseup', (e) => {
     isDragging = false;
-    if (Math.hypot(e.clientX - downX, e.clientY - downY) < 5 && !isPaused && !isDead && !inQuizModal) {
+    if (gameStarted && Math.hypot(e.clientX - downX, e.clientY - downY) < 5 && !isPaused && !isDead && !inQuizModal && !inSummaryModal) {
       const rect = canvas.getBoundingClientRect();
       pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -2197,6 +2410,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
 
   const keys = {};
   window.addEventListener('keydown', (e) => {
+    if (!gameStarted) return;
     SoundEngine.init();
     const k = e.key.toLowerCase();
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) {
@@ -2208,13 +2422,14 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       return;
     }
     if (k === 'escape') {
-      if (inQuizModal) fecharModalCreto();
-      else if (visorFotoAtivo) alternarVisorFoto();
+      if (inSummaryModal) fecharResumoSessao();
+      else if (inQuizModal) fecharModalCreto();
+      else if (visorFotoAtivo) fecharVisorFoto();
       else if (isPaused) togglePauseModal(false);
       return;
     }
     keys[k] = true;
-    if (isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal) return;
+    if (isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal || inSummaryModal) return;
 
     if (e.code === 'Space') {
       if (pState.climbing) {
@@ -2232,8 +2447,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     } else if (k === 'f') {
       executarAtaque();
     } else if (k === 'p') {
-      if (!visorFotoAtivo) alternarVisorFoto();
-      else tirarFoto();
+      acionarTeclaFoto();
     } else if (k === 'l') {
       alternarLanterna();
     } else if (k === 'g') {
@@ -2247,6 +2461,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       iniciarCutsceneDanca("💃 Comemorando no Bloco 734!");
     }
   });
+
   const analog = { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
 
   function bindXboxStick(el, onStick) {
@@ -2271,6 +2486,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     }
 
     el.addEventListener('pointerdown', (e) => {
+      if (!gameStarted) return;
       e.preventDefault();
       SoundEngine.init();
       pid = e.pointerId;
@@ -2288,10 +2504,8 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   bindXboxStick(document.getElementById('stick-look'), (x, y) => { analog.lookX = x; analog.lookY = y; });
   window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
-  
-
   window.addEventListener('mousemove', (e) => {
-    if (!isDragging || isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal) return;
+    if (!gameStarted || !isDragging || isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal || inSummaryModal) return;
     const dx = e.clientX - lastMX;
     const dy = e.clientY - lastMY;
     lastMX = e.clientX; lastMY = e.clientY;
@@ -2299,6 +2513,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     pState.camPitch = Math.max(0.05, Math.min(1.25, pState.camPitch + dy * 0.0055));
   });
   canvas.addEventListener('wheel', (e) => {
+    if (!gameStarted) return;
     e.preventDefault();
     pState.camDist = Math.max(3.4, Math.min(18.0, pState.camDist + e.deltaY * 0.005));
   }, { passive: false });
@@ -2370,7 +2585,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   }
 
   function executarEscalarArvorePosteR() {
-    if (isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal) return;
+    if (!gameStarted || isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal || inSummaryModal) return;
     if (pState.climbing) {
       pState.climbing = null;
       pState.onGround = false;
@@ -2390,7 +2605,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     pState.pos.y = Math.max(0.4, pState.pos.y);
     document.getElementById('climb-hud').style.display = 'flex';
     document.getElementById('climb-label').textContent =
-      `🧗 Escalando ${alvoClimb.nome}! [W/S] subir/descer • [A/D] equilibrar • [R] soltar`;
+      `🧗 Escalando ${alvoClimb.nome}! [W/S] ou Analógico Esq. subir/descer • [A/D] equilibrar • [R] soltar`;
     SoundEngine.playSwitch();
   }
 
@@ -2426,7 +2641,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   }
 
   function executarInteracaoE() {
-    if (isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal) return;
+    if (!gameStarted || isPaused || inCoffeeCutscene || inDanceCutscene || isDead || inQuizModal || inSummaryModal) return;
 
     const alvo = encontrarInteracaoE();
     if (!alvo) {
@@ -2496,9 +2711,10 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   }
 
   // ============================================================================
-  // 9. LOOP PRINCIPAL DE ANIMAÇÃO E FÍSICA
+  // 9. LOOP PRINCIPAL DE ANIMAÇÃO, CRONÔMETRO E FÍSICA
   // ============================================================================
   const clock = new THREE.Clock();
+  let timerAccum = 0;
   atualizarIluminacaoCena();
 
   function renderActiveCamera() {
@@ -2523,9 +2739,19 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     const dt = Math.min(clock.getDelta(), 0.05);
     const elapsed = clock.getElapsedTime();
 
-    if (isPaused || isDead || inQuizModal) {
+    if (!gameStarted || isPaused || isDead || inQuizModal || inSummaryModal) {
       renderActiveCamera();
       return;
+    }
+
+    if (!inCoffeeCutscene && !inDanceCutscene) {
+      timerAccum += dt;
+      if (timerAccum >= 1.0) {
+        const inc = Math.floor(timerAccum);
+        timerAccum -= inc;
+        sessionSeconds += inc;
+        document.getElementById('timer-badge').textContent = formatarTempo(sessionSeconds);
+      }
     }
 
     if (pState.damageCooldown > 0) pState.damageCooldown -= dt;
@@ -2687,12 +2913,22 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       const cl = pState.climbing;
       pState.pos.x = cl.x;
       pState.pos.z = cl.z;
-      if (keys['w'] || keys['arrowup']) { pState.pos.y += 3.0 * dt; isMoving = true; }
-      if (keys['s'] || keys['arrowdown']) { pState.pos.y -= 3.0 * dt; isMoving = true; }
+
+      let climbVert = 0;
+      if (keys['w'] || keys['arrowup']) climbVert += 1;
+      if (keys['s'] || keys['arrowdown']) climbVert -= 1;
+      if (Math.abs(analog.moveY) > 0.20) climbVert += analog.moveY;
+      climbVert = Math.max(-1, Math.min(1, climbVert));
+
+      if (Math.abs(climbVert) > 0.12) {
+        pState.pos.y += climbVert * 3.1 * dt;
+        isMoving = true;
+      }
 
       cl.balance += (Math.sin(elapsed * 3.4) * 0.48) * dt;
       if (keys['a'] || keys['arrowleft']) cl.balance -= 1.45 * dt;
       if (keys['d'] || keys['arrowright']) cl.balance += 1.45 * dt;
+      if (Math.abs(analog.moveX) > 0.15) cl.balance += analog.moveX * 1.45 * dt;
       const pct = 50 + cl.balance * 50;
       document.getElementById('balance-needle').style.left = `${Math.max(4, Math.min(96, pct))}%`;
 
@@ -3195,3 +3431,6 @@ with aba_quests:
     st.subheader("🧮 Matriz de Transformação Mundo → Câmera ($M_{wc}$)")
     M_wc_atual = construir_Mwc(cfg_atual["eye"], cfg_atual["at"], cfg_atual["up"])
     st.code(np.array2string(M_wc_atual, precision=4, suppress_small=True))
+```[cite: 17, 18]
+
+Se quiser testar como ficou no celular e no PC, vale checar especialmente a escalada com o analógico esquerdo e o ciclo `P` → `P` no visor de fotos[cite: 17]. Quando quiser avançar para a arquitetura MMO entre dois aparelhos, é só avisar!
