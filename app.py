@@ -565,6 +565,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     <div class="hud-pill">
       <span>⏱️ <b id="timer-badge" style="color:#38bdf8;">00:00</b></span>
       <span>•</span>
+      <span id="pvp-badge" style="color:#facc15;">⚔️ 1v1: Você 0 pts vs Rival 0 pts</span>
       <span>❤️ Life</span>
       <div class="bar-bg"><div id="energy-fill"></div></div>
       <span id="hp-text" style="font-size:11.5px; color:#cbd5e1;">100%</span>
@@ -1545,6 +1546,38 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   let shakeTimer = 0;
   let stepAccumulator = 0;
 
+  let rivalRun = {
+  nome: "Rival CT",
+  score: 450,
+  tempo: 55
+};
+
+function calcularScoreJogador() {
+  const invCount = collectibles.filter(c => c.coletado).length;
+  const pontos =
+    invCount * 100 +
+    pState.quests.fotos.size * 150 +
+    pState.quests.cretoAcertos * 200 +
+    windowsBrokenCount * 50;
+  const penalidade = Math.max(0, (100 - Math.round(energy)) * 2);
+  return Math.max(0, pontos - penalidade);
+}
+
+let ultimoScorePvP = 0;
+function atualizarPlacar1v1() {
+  const meuScore = calcularScoreJogador();
+  const badge = document.getElementById('pvp-badge');
+  if (badge) {
+    badge.textContent = `⚔️ 1v1: Você ${meuScore} pts vs ${rivalRun.nome} ${rivalRun.score} pts`;
+    badge.style.color = meuScore >= rivalRun.score ? '#4ade80' : '#facc15';
+  }
+  if (meuScore > rivalRun.score && ultimoScorePvP <= rivalRun.score) {
+    SoundEngine.playCollect();
+    mostrarAlerta(`🔥 VOCÊ ASSUMIU A LIDERANÇA DO 1v1 (${meuScore} vs ${rivalRun.score} pts)!`, "alert-success", 2800, "pvp");
+  }
+  ultimoScorePvP = meuScore;
+}
+
   const pState = {
     pos: new THREE.Vector3(24.0, 0.2, 15.2),
     velY: 0,
@@ -1615,6 +1648,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     setBadge('mq-solar', pState.quests.predioSolar);
     setBadge('mq-rua', pState.quests.travessia);
     setBadge('mq-creto', pState.quests.cretoAcertos >= 4);
+    atualizarPlacar1v1();
   }
 
   function abrirResumoSessao() {
@@ -1638,6 +1672,24 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     const emailLimpo = (document.getElementById('player-email-input').value || playerEmail || '').trim();
     playerEmail = emailLimpo;
     document.getElementById('sum-email-val').textContent = emailLimpo || 'Não informado';
+
+    const meuScoreFinal = calcularScoreJogador();
+    const venceuPvP = meuScoreFinal >= rivalRun.score;
+    mostrarAlerta(
+      venceuPvP
+        ? `🏆 Vitória no 1v1! Você (${meuScoreFinal} pts) venceu ${rivalRun.nome} (${rivalRun.score} pts).`
+        : `⚔️ ${rivalRun.nome} venceu por ${rivalRun.score} vs ${meuScoreFinal} pts — tente de novo!`,
+      venceuPvP ? "alert-success" : "alert-info",
+      3200,
+      "pvp_resumo"
+    );
+    if (venceuPvP) {
+      rivalRun = {
+        nome: "Seu Recorde",
+        score: meuScoreFinal,
+        tempo: Math.max(1, Math.floor(sessionSeconds))
+      };
+    }
 
     const mailBtn = document.getElementById('btn-mailto-summary');
     if (emailLimpo) {
