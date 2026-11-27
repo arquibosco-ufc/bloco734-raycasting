@@ -3433,4 +3433,4 @@ with aba_quests:
     st.code(np.array2string(M_wc_atual, precision=4, suppress_small=True))
 ```[cite: 17, 18]
 
-Se quiser testar como ficou no celular e no PC, vale checar especialmente a escalada com o analógico esquerdo e o ciclo `P` → `P` no visor de fotos[cite: 17]. Quando quiser avançar para a arquitetura MMO entre dois aparelhos, é só avisar!
+#Se quiser testar como ficou no celular e no PC, vale checar especialmente a escalada com o analógico esquerdo e o ciclo `P` → `P` no visor de fotos[cite: 17]. Quando quiser avançar para a arquitetura MMO entre dois aparelhos, é só avisar!
