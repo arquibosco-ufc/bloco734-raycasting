@@ -458,6 +458,7 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   }
   #gameover-modal h2 { font-size: 30px; color: #fca5a5; margin-bottom: 8px; }
   #gameover-reason { font-size: 15px; color: #fecaca; margin-bottom: 20px; max-width: 520px; }
+  
 
   /* MODAL RETRÁTIL DE INVENTÁRIO & QUESTS (PAUSA O JOGO) */
   #pause-modal {
@@ -574,6 +575,16 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
       </div>
       <div id="sum-email-box" style="font-size:12px; color:#93c5fd; background:#1e293b; border:1px solid #334155; border-radius:8px; padding:10px; margin-bottom:12px;">
         📧 E-mail: <b id="sum-email-val">Não informado</b>
+      </div>
+            <!-- Painel de Ranking Arcade -->
+
+      <div style="background:#1e293b; border:1px solid #334155; border-radius:10px; padding:10px; margin-bottom:12px;">
+        <div style="font-size:12px; font-weight:700; color:#facc15; margin-bottom:6px;">🏆 Placar Arcade — Registrar & Ver Jogadores</div>
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+          <input id="arcade-nickname-input" class="arcade-input" style="margin-bottom:0; flex:1;" maxlength="16" placeholder="Seu nome ou apelido arcade..." />
+          <button type="button" class="hud-btn" id="btn-save-ranking" style="background:#2563eb; border-color:#93c5fd;">💾 Salvar</button>
+        </div>
+        <div id="ranking-list-summary" style="max-height:150px; overflow-y:auto;"></div>
       </div>
       <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;">
         <a id="btn-mailto-summary" class="hud-btn" style="text-decoration:none; display:none;" target="_blank">✉️ Preparar E-mail</a>
@@ -710,10 +721,20 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   </div>
 
   <!-- MODAL GAME OVER -->
-  <div id="gameover-modal">
+    <div id="gameover-modal">
     <h2>💀 DUMB WAYS TO DIE — CT EDITION</h2>
     <p id="gameover-reason">Você sofreu um acidente no campus do Bloco 734!</p>
-    <button class="hud-btn" id="btn-respawn" style="font-size:15px; padding:11px 24px; background:#dc2626; border-color:#fca5a5;">
+
+    <div style="background:#1e293b; border:1px solid #334155; border-radius:10px; padding:10px; margin:14px 0; width:min(520px, 92vw); text-align:left;">
+      <div style="font-size:12px; font-weight:700; color:#facc15; margin-bottom:6px;">🏆 Placar Arcade — Registrar & Ver Jogadores</div>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <input id="arcade-nickname-input-go" class="arcade-input" style="margin-bottom:0; flex:1;" maxlength="16" placeholder="Seu nome ou apelido arcade..." />
+        <button type="button" class="hud-btn" id="btn-save-ranking-go" style="background:#2563eb; border-color:#93c5fd;">💾 Salvar</button>
+      </div>
+      <div id="ranking-list-go" style="max-height:150px; overflow-y:auto;"></div>
+    </div>
+
+    <button class="hud-btn" id="btn-respawn" ...>
       🔄 Renascer na Praça do Bloco 734
     </button>
   </div>
@@ -823,9 +844,25 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   let selectedAvatar = AVATAR_PROFILES[12]; // Computação por padrão
   let avatarPropMesh = null;
 
+  let avatarPropMesh = null;
+  let avatarLabelSprite = null;
+
+  function atualizarPlacaAvatar(nomeAvatar) {
+    if (avatarLabelSprite) {
+      player.grp.remove(avatarLabelSprite);
+      avatarLabelSprite = null;
+    }
+    avatarLabelSprite = criarPlacaFlutuante(`🧑 ${nomeAvatar}`, "#0f172a", "#38bdf8", 2.8, 0.48);
+    avatarLabelSprite.position.set(0, 2.55, 0);
+    player.grp.add(avatarLabelSprite);
+  }
+
   function aplicarAvatarSelecionado(prof) {
+    if (!prof) return;
     selectedAvatar = prof;
-    player.grp.scale.setScalar(prof.esc);
+
+    // Atualiza escala do grupo e cores de todas as partes do corpo
+    player.grp.scale.set(prof.esc, prof.esc, prof.esc);
     player.torso.material.color.setHex(prof.torso);
     player.cab.material.color.setHex(prof.cab);
     player.bE.material.color.setHex(prof.cab);
@@ -833,24 +870,50 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     player.pE.material.color.setHex(prof.calca);
     player.pD.material.color.setHex(prof.calca);
 
-    if (avatarPropMesh) {
-      avatarPropMesh.parent && avatarPropMesh.parent.remove(avatarPropMesh);
+    // Garante que o material reflita na hora
+    [player.torso, player.cab, player.bE, player.bD, player.pE, player.pD].forEach((m) => {
+      m.material.needsUpdate = true;
+    });
+
+    // Remove acessório anterior
+    if (avatarPropMesh && avatarPropMesh.parent) {
+      avatarPropMesh.parent.remove(avatarPropMesh);
       avatarPropMesh = null;
     }
+
+    // Adiciona acessório característico do perfil escolhido
     if (prof.prop === "capacete") {
-      avatarPropMesh = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.20, 0.54), new THREE.MeshStandardMaterial({ color: 0xfacc15 }));
-      avatarPropMesh.position.set(0, 2.12, 0);
+      avatarPropMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.56, 0.22, 0.56),
+        new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.35 })
+      );
+      avatarPropMesh.position.set(0, 2.14, 0);
       player.grp.add(avatarPropMesh);
     } else if (prof.prop === "saude") {
-      avatarPropMesh = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.10, 0.24), new THREE.MeshStandardMaterial({ color: 0xef4444 }));
+      avatarPropMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.36, 0.12, 0.26),
+        new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.4 })
+      );
       avatarPropMesh.position.set(0, 1.38, 0.22);
+      player.grp.add(avatarPropMesh);
+    } else if (prof.prop === "oculos") {
+      avatarPropMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.46, 0.11, 0.10),
+        new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.2 })
+      );
+      avatarPropMesh.position.set(0, 1.88, 0.25);
       player.grp.add(avatarPropMesh);
     } else if (prof.prop === "cracha" || prof.prop === "livro" || prof.prop === "arte") {
       const corP = prof.prop === "cracha" ? 0x38bdf8 : (prof.prop === "arte" ? 0xf472b6 : 0x4ade80);
-      avatarPropMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.22), new THREE.MeshStandardMaterial({ color: corP }));
+      avatarPropMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.30, 0.07, 0.24),
+        new THREE.MeshStandardMaterial({ color: corP, roughness: 0.5 })
+      );
       avatarPropMesh.position.set(0, -0.35, 0.16);
       player.bD.add(avatarPropMesh);
     }
+
+    atualizarPlacaAvatar(prof.nome);
   }
 
   const charGridList = document.getElementById('char-grid-list');
@@ -1389,6 +1452,46 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     arb.receiveShadow = true;
     scene.add(arb);
   });
+  // Sala do Laboratório de Asfalto com entrada livre pelo lado oeste (X ~ 59.2) e backdoor nos fundos
+  // Parede leste, norte e sul com abertura de porta backdoor nos fundos (Z = 52.5, X = 60.5)
+  addBox(0.22, 3.8, 15.0, matAlvenaria, 65.8, 2.0, 36.0);
+  addBox(6.8, 3.8, 0.22, matAlvenaria, 62.5, 2.0, 28.5);
+  // Parede sul dividida para criar a porta backdoor nos fundos
+  addBox(4.4, 3.8, 0.22, matAlvenaria, 63.6, 2.0, 43.5);
+
+  // Porta Backdoor nos Fundos (área vigiada pelo cachorro: X = 59.8, Z = 51.8)
+  const backdoorPos = new THREE.Vector3(59.8, 0.2, 51.8);
+  const backdoorMesh = addBox(0.24, 2.3, 1.35, new THREE.MeshStandardMaterial({
+    color: 0xdc2626, emissive: 0x7f1d1d, emissiveIntensity: 0.55, roughness: 0.4
+  }), backdoorPos.x, 1.35, backdoorPos.z);
+
+  const placaBackdoor = criarPlacaFlutuante("🚪 BACKDOOR LAB ASFALTO [E]", "#7f1d1d", "#fca5a5", 3.5, 0.62);
+  placaBackdoor.position.set(backdoorPos.x, 2.85, backdoorPos.z);
+  scene.add(placaBackdoor);
+
+  const backdoorAction = {
+    id: "backdoor_lab_asfalto",
+    titulo: "Backdoor Secreta — Laboratório de Asfalto",
+    x: backdoorPos.x,
+    z: backdoorPos.z,
+    acaoFn: () => {
+      SoundEngine.playSwitch();
+      pState.pos.set(61.5, 0.2, 41.5);
+      pState.quests.labAsfaltoVisitado = true;
+      mostrarAlerta("🚪 Você entrou pela BACKDOOR no Laboratório de Asfalto do CT! Pressione [E] nas bancadas.", "alert-success", 3200, "lab");
+      atualizarHUD();
+    }
+  };
+  backdoorMesh.userData.totem = backdoorAction;
+  clickableTotems.push(backdoorMesh);
+  registrarAR(
+    "Backdoor do Laboratório de Asfalto (Fundos)",
+    "ATALHO SECRETO • ÁREA DO CÃO DE GUARDA",
+    "Porta lateral/fundos na área vigiada pelo cachorro. Pressione [E] perto dela para entrar direto no Laboratório de Asfalto!",
+    "Porta Emissiva • Teleporte Interno para o Lab [E]",
+    [backdoorPos.x, 1.3, backdoorPos.z], [1.2, 2.4, 1.6],
+    { totem: backdoorAction }
+  );
 
   // Postes de Iluminação Escaláveis ([R])
   const postesData = [
@@ -1836,6 +1939,98 @@ function atualizarPlacar1v1() {
     atualizarHUD();
     canvas.focus();
   });
+
+  const RANKING_API_URL = ""; // Opcional: cole aqui a URL do seu endpoint/Supabase REST para ranking global entre jogadores
+
+  function montarResumoMissoes() {
+    const inv = collectibles.filter(c => c.coletado).length;
+    const fotos = pState.quests.fotos.size;
+    const creto = pState.quests.cretoAcertos;
+    const lab = pState.quests.labAsfaltoVisitado ? "Lab✔" : "Lab•";
+    const gols = golsCampo > 0 ? `⚽${golsCampo}` : "⚽0";
+    return `Inv ${inv}/8 • 📸${fotos}/5 • Creto ${creto}/4 • ${lab} • ${gols}`;
+  }
+
+  function lerRankingLocal() {
+    try {
+      const raw = localStorage.getItem("bloco734_ranking_arcade_v1");
+      return raw ? JSON.parse(raw) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function salvarRankingLocal(lista) {
+    try {
+      localStorage.setItem("bloco734_ranking_arcade_v1", JSON.stringify(lista.slice(0, 25)));
+    } catch (_) {}
+  }
+
+  async function carregarRankingArcade() {
+    let lista = lerRankingLocal();
+    if (RANKING_API_URL) {
+      try {
+        const resp = await fetch(RANKING_API_URL);
+        if (resp.ok) {
+          const dados = await resp.json();
+          if (Array.isArray(dados)) lista = dados;
+        }
+      } catch (_) {}
+    }
+    return lista.sort((a, b) => b.score - a.score).slice(0, 12);
+  }
+
+  async function registrarNoRankingArcade(apelido) {
+    const nomeLimpo = (apelido || "").trim().slice(0, 16) || "Jogador_CT";
+    const registro = {
+      nome: nomeLimpo,
+      avatar: selectedAvatar ? selectedAvatar.nome : "Computação",
+      score: calcularScoreJogador(),
+      tempo: formatarTempo(sessionSeconds),
+      missoes: montarResumoMissoes(),
+      motivo: isDead ? "Game Over" : "Encerrou Sessão",
+      criado_em: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    };
+
+    const atual = lerRankingLocal();
+    atual.push(registro);
+    atual.sort((a, b) => b.score - a.score);
+    salvarRankingLocal(atual);
+
+    if (RANKING_API_URL) {
+      try {
+        await fetch(RANKING_API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(registro)
+        });
+      } catch (_) {}
+    }
+    return carregarRankingArcade();
+  }
+
+  async function renderizarTabelaRanking(containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const top = await carregarRankingArcade();
+    if (!top.length) {
+      el.innerHTML = `<div style="font-size:12px; color:#94a3b8;">Nenhum registro ainda. Seja o primeiro a entrar no placar!</div>`;
+      return;
+    }
+    el.innerHTML = top.map((r, i) => `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid rgba(148,163,184,0.18); font-size:12px;">
+        <div>
+          <b style="color:${i === 0 ? '#facc15' : '#38bdf8'};">#${i + 1} ${r.nome}</b>
+          <span style="color:#94a3b8;">(${r.avatar})</span>
+          <div style="font-size:11px; color:#cbd5e1;">${r.missoes} • ${r.motivo}</div>
+        </div>
+        <div style="text-align:right; white-space:nowrap;">
+          <b style="color:#4ade80; font-size:13px;">${r.score} pts</b>
+          <div style="font-size:10.5px; color:#94a3b8;">⏱️ ${r.tempo}</div>
+        </div>
+      </div>
+    `).join("");
+  }
 
   document.getElementById('btn-summary').addEventListener('click', () => {
     abrirResumoSessao();
@@ -2900,6 +3095,9 @@ function atualizarPlacar1v1() {
       if (td && Math.hypot(pState.pos.x - td.x, pState.pos.z - td.z) < 2.5 && pState.pos.y < 1.8) {
         return { tipo: 'totem', totem: td };
       }
+    }
+    if (Math.hypot(pState.pos.x - backdoorPos.x, pState.pos.z - backdoorPos.z) < 2.8 && pState.pos.y < 2.2) {
+      return { tipo: 'totem', totem: backdoorAction };
     }
     let melhor = null;
     let menorDist = 5.4;
