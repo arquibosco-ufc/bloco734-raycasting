@@ -162,19 +162,25 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
     background: #0b1120; font-family: 'Segoe UI', system-ui, sans-serif;
   }
   #game-wrapper {
-    position: relative; width: 100%; height: 720px;
+    position: relative; width: 100%; height: clamp(460px, 82dvh, 720px);
     background: #0b1120; border-radius: 12px; overflow: hidden;
     border: 1px solid #1e293b;
   }
   @media (max-width: 900px), (pointer: coarse), (any-pointer: coarse) {
-    #game-wrapper { height: 560px; }
+    #game-wrapper { height: clamp(430px, 76dvh, 560px); }
     #xbox-sticks { display: block !important; }
   }
-  #game-wrapper.pseudo-fullscreen {
-    position: fixed !important; inset: 0 !important;
-    width: 100vw !important; height: 100vh !important;
-    z-index: 999999 !important; border-radius: 0 !important;
+  .char-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px; max-height: 250px; overflow-y: auto; margin: 10px 0 14px 0; text-align: left;
   }
+  .char-btn {
+    background: #020617; border: 1px solid #334155; color: #e2e8f0;
+    border-radius: 10px; padding: 8px 10px; font-size: 11.5px; font-weight: 700;
+    cursor: pointer; transition: 0.15s;
+  }
+  .char-btn:hover { border-color: #38bdf8; }
+  .char-btn.active { border-color: #38bdf8; background: rgba(37, 99, 235, 0.28); color: #fff; }
   canvas { display: block; width: 100%; height: 100%; cursor: grab; outline: none; }
   canvas:active { cursor: grabbing; }
 
@@ -517,10 +523,11 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   <!-- TELA INICIAL ARCADE START -->
   <div id="arcade-start-overlay">
     <div class="arcade-card">
-      <div class="arcade-badge">🕹️ BLOCO 734 • CT / UFC</div>
+      <div class="arcade-badge">🕹️ BLOCO 734 • CT / UFC • GRATUITO</div>
       <div class="arcade-title">CAMPUS 3D INTERATIVO</div>
       <div class="arcade-sub">
-        Explore o Bloco 734, colete entregas, fotografe alvos técnicos, enfrente o Quiz do Prof. Creto e acompanhe seu tempo de sessão.
+        Feito com código aberto/educacional (sem app na loja — roda direto no navegador!).
+        Escolha seu avatar, explore o Bloco 734 e dispute o placar 1v1.
       </div>
       <input
         id="player-email-input"
@@ -528,7 +535,22 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
         type="email"
         placeholder="Seu e-mail (opcional — salvo no resumo da sessão)"
       />
-      <button id="btn-arcade-start">▶ START</button>
+      <button id="btn-arcade-start">▶ START (TELA CHEIA)</button>
+    </div>
+  </div>
+
+  <!-- TELA DE SELEÇÃO DE PERSONAGEM -->
+  <div id="character-select-overlay" style="display:none; position:absolute; inset:0; background:rgba(2,6,23,0.95); backdrop-filter:blur(8px); z-index:48; padding:18px; align-items:center; justify-content:center; color:#f8fafc;">
+    <div class="arcade-card" style="width:min(640px, 95vw);">
+      <div class="arcade-badge">🎭 ESCOLHA SEU AVATAR • UFC</div>
+      <div class="arcade-title" style="font-size:20px;">SELECIONE SEU PERSONAGEM</div>
+      <div class="arcade-sub" style="margin-bottom:8px;">
+        Escolha quem vai explorar o campus. Pressione <b>ESC</b> a qualquer momento para sair da tela cheia.
+      </div>
+      <div class="char-grid" id="char-grid-list"></div>
+      <button id="btn-confirm-char" style="width:100%; padding:11px 16px; border-radius:12px; border:1px solid #86efac; background:linear-gradient(135deg,#16a34a,#0284c7); color:#fff; font-size:14px; font-weight:900; cursor:pointer;">
+        🚀 ENTRAR NO CAMPUS
+      </button>
     </div>
   </div>
 
@@ -2607,6 +2629,7 @@ function atualizarPlacar1v1() {
           w.hpBarFill.visible = false;
           windowsBrokenCount++;
           document.getElementById('win-broken').textContent = `${windowsBrokenCount}/${breakableWindows.length}`;
+          atualizarPlacar1v1();
           SoundEngine.playGlass();
           spawnParticulas(w.pos, 0xe0f2fe, 24);
           dispararDerramamentoAsfalto(w);
@@ -3483,6 +3506,3 @@ with aba_quests:
     st.subheader("🧮 Matriz de Transformação Mundo → Câmera ($M_{wc}$)")
     M_wc_atual = construir_Mwc(cfg_atual["eye"], cfg_atual["at"], cfg_atual["up"])
     st.code(np.array2string(M_wc_atual, precision=4, suppress_small=True))
-#```[cite: 17, 18]
-
-#Se quiser testar como ficou no celular e no PC, vale checar especialmente a escalada com o analógico esquerdo e o ciclo `P` → `P` no visor de fotos[cite: 17]. Quando quiser avançar para a arquitetura MMO entre dois aparelhos, é só avisar!
