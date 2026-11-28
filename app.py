@@ -844,7 +844,6 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   let selectedAvatar = AVATAR_PROFILES[12]; // Computação por padrão
   let avatarPropMesh = null;
 
-  let avatarPropMesh = null;
   let avatarLabelSprite = null;
 
   function atualizarPlacaAvatar(nomeAvatar) {
