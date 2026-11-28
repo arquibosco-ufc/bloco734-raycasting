@@ -802,7 +802,100 @@ def gerar_html_jogo_webgl(modo_noite=False, ativar_sol=True, ativar_spots=True):
   wrapper.addEventListener('mouseenter', () => {
     if (gameStarted && !isPaused && !inQuizModal && !inSummaryModal) canvas.focus();
   });
+  const AVATAR_PROFILES = [
+    { id: "menino", nome: "Menino", tag: "Infantil", torso: 0x38bdf8, cab: 0xfed7aa, calca: 0x1d4ed8, esc: 0.88, prop: "none" },
+    { id: "menina", nome: "Menina", tag: "Infantil", torso: 0xf472b6, cab: 0xfed7aa, calca: 0x7c3aed, esc: 0.88, prop: "none" },
+    { id: "ado_m", nome: "Adolescente Menino", tag: "Juvenil", torso: 0x0ea5e9, cab: 0xfacc15, calca: 0x1e293b, esc: 0.96, prop: "none" },
+    { id: "ado_f", nome: "Adolescente Menina", tag: "Juvenil", torso: 0xec4899, cab: 0xfacc15, calca: 0x334155, esc: 0.96, prop: "none" },
+    { id: "cc_m", nome: "Graduação C. Ciências (Menino)", tag: "Centro de Ciências", torso: 0x14b8a6, cab: 0xfed7aa, calca: 0x0f172a, esc: 1.0, prop: "livro" },
+    { id: "cc_f", nome: "Graduação C. Ciências (Menina)", tag: "Centro de Ciências", torso: 0x2dd4bf, cab: 0xfed7aa, calca: 0x1e293b, esc: 1.0, prop: "livro" },
+    { id: "ic_m", nome: "Bolsista IC (Menino)", tag: "Iniciação Científica", torso: 0x6366f1, cab: 0xfdba74, calca: 0x1e293b, esc: 1.0, prop: "cracha" },
+    { id: "ic_f", nome: "Bolsista IC (Menina)", tag: "Iniciação Científica", torso: 0x8b5cf6, cab: 0xfdba74, calca: 0x0f172a, esc: 1.0, prop: "cracha" },
+    { id: "ica_m", nome: "Estudante ICA (Menino)", tag: "Cultura e Arte", torso: 0xf97316, cab: 0xfed7aa, calca: 0x3f2e21, esc: 1.0, prop: "arte" },
+    { id: "ica_f", nome: "Estudante ICA (Menina)", tag: "Cultura e Arte", torso: 0xf43f5e, cab: 0xfed7aa, calca: 0x27272a, esc: 1.0, prop: "arte" },
+    { id: "saude", nome: "Área da Saúde (Porangabuçu)", tag: "Med/Enf/Fisio", torso: 0xf8fafc, cab: 0xfed7aa, calca: 0x0284c7, esc: 1.0, prop: "saude" },
+    { id: "ct_eng", nome: "Centro de Tecnologia (Engenharia)", tag: "CT / UFC", torso: 0xeab308, cab: 0xfdba74, calca: 0x1e293b, esc: 1.02, prop: "capacete" },
+    { id: "comp", nome: "Estudante de Computação", tag: "CG / Sistemas", torso: 0x2563eb, cab: 0xfed7aa, calca: 0x0f172a, esc: 1.0, prop: "oculos" },
+    { id: "mestrado", nome: "Pós-Graduação: Mestrado", tag: "Mestre / UFC", torso: 0x059669, cab: 0xfed7aa, calca: 0x111827, esc: 1.02, prop: "livro" },
+    { id: "doutorado", nome: "Pós-Graduação: Doutorado", tag: "Doutor / UFC", torso: 0x4338ca, cab: 0xfed7aa, calca: 0x090d16, esc: 1.03, prop: "livro" }
+  ];
 
+  let selectedAvatar = AVATAR_PROFILES[12]; // Computação por padrão
+  let avatarPropMesh = null;
+
+  function aplicarAvatarSelecionado(prof) {
+    selectedAvatar = prof;
+    player.grp.scale.setScalar(prof.esc);
+    player.torso.material.color.setHex(prof.torso);
+    player.cab.material.color.setHex(prof.cab);
+    player.bE.material.color.setHex(prof.cab);
+    player.bD.material.color.setHex(prof.cab);
+    player.pE.material.color.setHex(prof.calca);
+    player.pD.material.color.setHex(prof.calca);
+
+    if (avatarPropMesh) {
+      avatarPropMesh.parent && avatarPropMesh.parent.remove(avatarPropMesh);
+      avatarPropMesh = null;
+    }
+    if (prof.prop === "capacete") {
+      avatarPropMesh = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.20, 0.54), new THREE.MeshStandardMaterial({ color: 0xfacc15 }));
+      avatarPropMesh.position.set(0, 2.12, 0);
+      player.grp.add(avatarPropMesh);
+    } else if (prof.prop === "saude") {
+      avatarPropMesh = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.10, 0.24), new THREE.MeshStandardMaterial({ color: 0xef4444 }));
+      avatarPropMesh.position.set(0, 1.38, 0.22);
+      player.grp.add(avatarPropMesh);
+    } else if (prof.prop === "cracha" || prof.prop === "livro" || prof.prop === "arte") {
+      const corP = prof.prop === "cracha" ? 0x38bdf8 : (prof.prop === "arte" ? 0xf472b6 : 0x4ade80);
+      avatarPropMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.22), new THREE.MeshStandardMaterial({ color: corP }));
+      avatarPropMesh.position.set(0, -0.35, 0.16);
+      player.bD.add(avatarPropMesh);
+    }
+  }
+
+  const charGridList = document.getElementById('char-grid-list');
+  AVATAR_PROFILES.forEach((prof, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'char-btn' + (i === 12 ? ' active' : '');
+    btn.innerHTML = `<div>${prof.nome}</div><div style="font-size:10px; color:#94a3b8; font-weight:600;">${prof.tag}</div>`;
+    btn.onclick = () => {
+      document.querySelectorAll('.char-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      aplicarAvatarSelecionado(prof);
+      SoundEngine.playSwitch();
+    };
+    charGridList.appendChild(btn);
+  });
+
+  function entrarTelaCheiaJogo() {
+    if (!document.fullscreenElement && !wrapper.classList.contains('pseudo-fullscreen')) {
+      if (wrapper.requestFullscreen) {
+        wrapper.requestFullscreen().catch(() => wrapper.classList.add('pseudo-fullscreen'));
+      } else {
+        wrapper.classList.add('pseudo-fullscreen');
+      }
+    }
+  }
+
+  document.getElementById('btn-arcade-start').addEventListener('click', () => {
+    SoundEngine.init();
+    playerEmail = (document.getElementById('player-email-input').value || '').trim();
+    document.getElementById('arcade-start-overlay').style.display = 'none';
+    document.getElementById('character-select-overlay').style.display = 'flex';
+    entrarTelaCheiaJogo();
+    SoundEngine.playSwitch();
+  });
+
+  document.getElementById('btn-confirm-char').addEventListener('click', () => {
+    aplicarAvatarSelecionado(selectedAvatar);
+    document.getElementById('character-select-overlay').style.display = 'none';
+    gameStarted = true;
+    atualizarHUD();
+    SoundEngine.playCollect();
+    mostrarAlerta(`🎭 Jogando como ${selectedAvatar.nome}!`, 'alert-info', 2200, 'info');
+    canvas.focus();
+  });
   // ============================================================================
   // 1. MOTOR DE ÁUDIO PROCEDURAL (WEB AUDIO API)
   // ============================================================================
@@ -1833,37 +1926,34 @@ function atualizarPlacar1v1() {
 
     if (escolha === item.ans) {
       SoundEngine.playCollect();
-      pState.quests.cretoAcertos++;
-      energy = Math.min(100, energy + 10);
-      fb.style.color = '#4ade80';
-      fb.textContent = `🎉 ACERTOU! ${item.exp}`;
-      mostrarAlerta(`🎉 Boa! +10 Life (${pState.quests.cretoAcertos}/4 acertos com Prof. Creto)`, 'alert-success', 2200, 'success');
+      if (quizTentativaAtual === 0) {
+        pState.quests.cretoAcertos++;
+        energy = Math.min(100, energy + 10);
+        fb.style.color = '#4ade80';
+        fb.textContent = `🎉 ACERTOU DE PRIMEIRA! ${item.exp}`;
+      } else {
+        fb.style.color = '#38bdf8';
+        fb.textContent = `✔ Resposta encontrada (sem ponto extra de tentativa): ${item.exp}`;
+      }
+      atualizarHUD();
+      setTimeout(() => {
+        quizIdx++;
+        if (quizIdx < 4) {
+          renderizarPerguntaCreto();
+        } else {
+          pState.quests.cretoConcluido = true;
+          atualizarHUD();
+          fecharModalCreto();
+          iniciarCutsceneDanca("🎓 MISSÃO DO PROF. CRETO CONCLUÍDA! Comemorando no Bloco 734!");
+        }
+      }, 1300);
     } else {
+      quizTentativaAtual++;
       SoundEngine.playError();
       fb.style.color = '#f87171';
-      fb.textContent = `❌ ERROU! ${item.exp}`;
-      aplicarDano(15, 'Resposta incorreta no Quiz de Computação Gráfica!');
+      fb.textContent = `❌ Não foi dessa vez! Tente outra opção (sem ponto extra nesta questão). ${item.exp}`;
+      aplicarDano(5, 'Tentativa incorreta no Quiz do Prof. Creto!');
     }
-    atualizarHUD();
-
-    setTimeout(() => {
-      quizIdx++;
-      if (quizIdx < 4) {
-        renderizarPerguntaCreto();
-      } else {
-        const aprov = pState.quests.cretoAcertos >= 3;
-        fb.style.color = aprov ? '#4ade80' : '#fbbf24';
-        fb.textContent = aprov
-          ? `🏆 Desafio concluído (${pState.quests.cretoAcertos}/4)! O Prof. Creto comemora sua aprovação!`
-          : `📚 Desafio encerrado (${pState.quests.cretoAcertos}/4). Fale novamente com o Prof. Creto para tentar outra bateria!`;
-        if (aprov) {
-          setTimeout(() => {
-            fecharModalCreto();
-            iniciarCutsceneDanca("🎓 APROVADO EM COMPUTAÇÃO GRÁFICA! Comemorando com o Prof. Creto!");
-          }, 1200);
-        }
-      }
-    }, 1600);
   }
 
   // Alunos na Praça
@@ -2496,6 +2586,8 @@ function atualizarPlacar1v1() {
       return;
     }
     if (k === 'escape') {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      wrapper.classList.remove('pseudo-fullscreen');
       if (inSummaryModal) fecharResumoSessao();
       else if (inQuizModal) fecharModalCreto();
       else if (visorFotoAtivo) fecharVisorFoto();
