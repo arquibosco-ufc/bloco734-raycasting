@@ -2265,7 +2265,114 @@ function atualizarPlacar1v1() {
     [cafePos.x, 1.0, cafePos.z], [1.1, 1.7, 1.0],
     { isCoffeeMachine: true }
   );
+  // ============================================================================
+  // 7B. LABORATÓRIO DE ASFALTO DO CT (4 BANCADAS) & CAMPO DE FUTEBOL
+  // ============================================================================
+  const matGramaCampo = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.85 });
+  const matLinhaCampo = new THREE.MeshBasicMaterial({ color: 0xf8fafc });
+  const matBancadaLab = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5, metalness: 0.3 });
+  const matAcoLab = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.25, metalness: 0.85 });
 
+  // Laboratório de Asfalto do CT (Ala Leste / Lateral: X = 62.5, Z = 36.0)
+  addBox(6.8, 0.14, 15.0, new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.7 }), 62.5, 0.17, 36.0, 0, false);
+  addBox(0.22, 3.8, 15.0, matAlvenaria, 65.8, 2.0, 36.0);
+  addBox(6.8, 0.18, 15.0, matMetalGalv, 62.5, 3.95, 36.0);
+  const placaLab = criarPlacaFlutuante("🧪 LAB. DE ASFALTO • CT/UFC", "#0f172a", "#38bdf8", 4.2, 0.75);
+  placaLab.position.set(62.2, 4.55, 36.0);
+  scene.add(placaLab);
+
+  const bancadasAsfalto = [
+    {
+      id: "lab_agregados",
+      nome: "Bancada 1: Agregados e Preparação de Amostras",
+      x: 61.2, z: 30.2,
+      desc: "Peneiras granulométricas (aço inox, latão, nylon), agitador mecânico/elétrico, repartidor de amostras (quarteador/Jones), balanças, estufas/chapas aquecedoras, equivalente de areia e massa específica.",
+      meta: "Agregados • Granulometria & Amostragem [E]"
+    },
+    {
+      id: "lab_ligantes",
+      nome: "Bancada 2: Ligantes Asfálticos (CAP e Emulsões)",
+      x: 61.2, z: 34.0,
+      desc: "Viscosímetros (rotacional, Saybolt Furol, capilares) e banhos, penetrômetro, ponto de fulgor e anel e bola, estufas de envelhecimento (RTFOT), ductilômetro, reômetro de cisalhamento dinâmico (DSR) e alambiques.",
+      meta: "CAP & Emulsões • Reologia e Envelhecimento [E]"
+    },
+    {
+      id: "lab_misturas",
+      nome: "Bancada 3: Misturas Asfálticas e Dosagem",
+      x: 61.2, z: 37.8,
+      desc: "Misturador automático/planetário, compactador Marshall, giratório Superpave, de placas/prismas, prensa Marshall, ensaio Rice, extratores de betume (rotarex, refluxo, soxhlet), bombas de vácuo e ensaios mecânicos (tração indireta, triaxial dinâmico, simulador de tráfego / roda carregada).",
+      meta: "Dosagem & Desempenho Mecânico [E]"
+    },
+    {
+      id: "lab_seguranca",
+      nome: "Bancada 4: Utensílios, Medição e Segurança",
+      x: 61.2, z: 41.6,
+      desc: "Termômetros, paquímetros, extensômetros, relógios comparadores, recipientes/bandejas/espátulas/cálices/solventes/óleos e segurança: coifa de exaustão, lava-olhos, luvas térmicas e aventais.",
+      meta: "Metrologia & EPIs de Laboratório [E]"
+    }
+  ];
+
+  bancadasAsfalto.forEach((b, idx) => {
+    addBox(1.8, 0.92, 2.5, matBancadaLab, b.x, 0.65, b.z);
+    addBox(1.86, 0.08, 2.56, matAcoLab, b.x, 1.14, b.z);
+    // Equipamentos estilizados sobre cada bancada
+    const eq1 = new THREE.Mesh(
+      idx === 1 ? new THREE.CylinderGeometry(0.28, 0.28, 0.55, 16) : new THREE.BoxGeometry(0.55, 0.45, 0.55),
+      idx === 2 ? matSolar : matAcoLab
+    );
+    eq1.position.set(b.x - 0.25, 1.40, b.z - 0.45);
+    eq1.castShadow = true;
+    scene.add(eq1);
+
+    const eq2 = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.42, 14), matMadeira);
+    eq2.position.set(b.x + 0.25, 1.36, b.z + 0.45);
+    eq2.castShadow = true;
+    scene.add(eq2);
+
+    const totemB = { id: b.id, titulo: b.nome, x: b.x, z: b.z, acaoFn: () => {
+      SoundEngine.playSwitch();
+      document.getElementById('ar-title').textContent = b.nome;
+      document.getElementById('ar-desc').textContent = b.desc;
+      document.getElementById('ar-meta').textContent = b.meta;
+      document.getElementById('ar-card').style.display = 'block';
+      arTimer = 8.0;
+    }};
+    eq1.userData.totem = totemB;
+    eq2.userData.totem = totemB;
+    clickableTotems.push(eq1, eq2);
+
+    registrarAR(b.nome, "LABORATÓRIO DE ASFALTO • CT", b.desc, b.meta, [b.x, 1.2, b.z], [2.1, 1.8, 2.7], { totem: totemB });
+  });
+
+  // Campo de Futebol do Campus (Área Sul/Oeste: X = 12.0..28.0, Z = 44.0..57.5)
+  const campoX = 19.5, campoZ = 50.5;
+  addBox(15.0, 0.08, 10.0, matGramaCampo, campoX, 0.14, campoZ, 0, false);
+  // Linhas do campo e traves
+  addBox(14.2, 0.03, 0.14, matLinhaCampo, campoX, 0.19, campoZ - 4.6, 0, false);
+  addBox(14.2, 0.03, 0.14, matLinhaCampo, campoX, 0.19, campoZ + 4.6, 0, false);
+  addBox(0.14, 0.03, 9.2, matLinhaCampo, campoX - 7.1, 0.19, campoZ, 0, false);
+  addBox(0.14, 0.03, 9.2, matLinhaCampo, campoX + 7.1, 0.19, campoZ, 0, false);
+  addBox(0.14, 0.03, 9.2, matLinhaCampo, campoX, 0.19, campoZ, 0, false);
+
+  [-7.1, 7.1].forEach((gx) => {
+    addBox(0.12, 1.8, 0.12, matLinhaCampo, campoX + gx, 1.05, campoZ - 1.5);
+    addBox(0.12, 1.8, 0.12, matLinhaCampo, campoX + gx, 1.05, campoZ + 1.5);
+    addBox(0.12, 0.12, 3.12, matLinhaCampo, campoX + gx, 1.95, campoZ);
+  });
+
+  const placaCampo = criarPlacaFlutuante("⚽ CAMPO DE FUTEBOL • CT", "#14532d", "#86efac", 3.6, 0.65);
+  placaCampo.position.set(campoX, 2.7, campoZ - 5.2);
+  scene.add(placaCampo);
+
+  const bolaFutebol = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35 })
+  );
+  bolaFutebol.position.set(campoX, 0.46, campoZ);
+  bolaFutebol.castShadow = true;
+  scene.add(bolaFutebol);
+  const bolaVel = new THREE.Vector3(0, 0, 0);
+  let golsCampo = 0;
   // ============================================================================
   // 8. JOGADOR ARTICULADO, LANTERNA, MINI-QUESTS, VIGILANTES & MODO FOTO
   // ============================================================================
@@ -3234,6 +3341,53 @@ function atualizarPlacar1v1() {
       player.bE.rotation.x *= 0.8;
       if (attackTimer <= 0) player.bD.rotation.x *= 0.8;
     }
+    // Física da Bola de Futebol (Campo em X=19.5, Z=50.5)
+    const distBolaPlayer = Math.hypot(pState.pos.x - bolaFutebol.position.x, pState.pos.z - bolaFutebol.position.z);
+    const chutandoAgora = (attackTimer > 0.25 && distBolaPlayer < 2.2) || (distBolaPlayer < 0.95 && pState.pos.y < 1.5);
+    if (chutandoAgora) {
+      const dirChute = new THREE.Vector3(
+        bolaFutebol.position.x - pState.pos.x,
+        0,
+        bolaFutebol.position.z - pState.pos.z
+      );
+      if (dirChute.lengthSq() < 0.001) dirChute.set(Math.sin(pState.yaw), 0, Math.cos(pState.yaw));
+      dirChute.normalize();
+      const forca = attackTimer > 0.25 ? 13.5 : 8.5;
+      bolaVel.x = dirChute.x * forca;
+      bolaVel.z = dirChute.z * forca;
+      bolaVel.y = attackTimer > 0.25 ? 4.8 : 2.2;
+      SoundEngine.playJump();
+    }
+    bolaVel.y -= 16.0 * dt;
+    bolaFutebol.position.x += bolaVel.x * dt;
+    bolaFutebol.position.y += bolaVel.y * dt;
+    bolaFutebol.position.z += bolaVel.z * dt;
+    bolaFutebol.rotation.x += bolaVel.z * dt * 2.2;
+    bolaFutebol.rotation.z -= bolaVel.x * dt * 2.2;
+    if (bolaFutebol.position.y <= 0.46) {
+      bolaFutebol.position.y = 0.46;
+      if (bolaVel.y < -1.5) bolaVel.y = -bolaVel.y * 0.55;
+      else bolaVel.y = 0;
+      bolaVel.x *= Math.pow(0.18, dt);
+      bolaVel.z *= Math.pow(0.18, dt);
+    }
+    // Limites do campo e checagem de gol
+    if (Math.abs(bolaFutebol.position.z - campoZ) > 4.6) {
+      bolaVel.z *= -0.7;
+      bolaFutebol.position.z = campoZ + Math.sign(bolaFutebol.position.z - campoZ) * 4.6;
+    }
+    if (Math.abs(bolaFutebol.position.x - campoX) > 7.1) {
+      if (Math.abs(bolaFutebol.position.z - campoZ) < 1.55 && bolaFutebol.position.y < 1.9) {
+        golsCampo++;
+        SoundEngine.playCollect();
+        mostrarAlerta(`⚽ GOOOL NO CAMPUS CT! Placar do campo: ${golsCampo} gol(s)!`, "alert-success", 2600, "futebol");
+        bolaFutebol.position.set(campoX, 0.46, campoZ);
+        bolaVel.set(0, 0, 0);
+      } else {
+        bolaVel.x *= -0.7;
+        bolaFutebol.position.x = campoX + Math.sign(bolaFutebol.position.x - campoX) * 7.1;
+      }
+    }
 
     if (attackTimer > 0) {
       attackTimer -= dt;
@@ -3598,3 +3752,35 @@ with aba_quests:
     st.subheader("🧮 Matriz de Transformação Mundo → Câmera ($M_{wc}$)")
     M_wc_atual = construir_Mwc(cfg_atual["eye"], cfg_atual["at"], cfg_atual["up"])
     st.code(np.array2string(M_wc_atual, precision=4, suppress_small=True))
+
+# ==============================================================================
+# CAIXA DE SUGESTÕES DOS JOGADORES (FEEDBACK DO BETA TEST)
+# ==============================================================================
+if "sugestoes_jogadores" not in st.session_state:
+    st.session_state.sugestoes_jogadores = [
+        {"autor": "Beta Test (10 anos)", "ideia": "Entrar no Laboratório de Asfalto do CT para ver peneiras e ensaios"},
+        {"autor": "Beta Test (10 anos)", "ideia": "Jogar bola em um Campo de Futebol no campus"},
+    ]
+
+with st.expander("💡 Caixa de Sugestões — Peça Novas Áreas, Itens ou Modos", expanded=False):
+    st.caption("Inspirado nas ideias espontâneas do beta test: diga o que você gostaria de ver no Bloco 734!")
+    c_sug1, c_sug2 = st.columns([1.2, 2.8])
+    with c_sug1:
+        autor_sug = st.text_input("Seu nome ou apelido", placeholder="Ex.: Lucas (10 anos)", key="input_autor_sug")
+    with c_sug2:
+        texto_sug = st.text_input("Sua sugestão para o jogo", placeholder="Ex.: Lab de Robótica, pista de skate, nova quest...", key="input_texto_sug")
+    if st.button("📨 Enviar Sugestão", key="btn_enviar_sug"):
+        if texto_sug.strip():
+            st.session_state.sugestoes_jogadores.insert(
+                0,
+                {
+                    "autor": autor_sug.strip() or "Jogador Anônimo",
+                    "ideia": texto_sug.strip(),
+                },
+            )
+            st.success("Sugestão registrada na sessão! Obrigado por ajudar a construir o jogo.")
+        else:
+            st.warning("Escreva uma sugestão antes de enviar.")
+
+    for item_sug in st.session_state.sugestoes_jogadores[:8]:
+        st.markdown(f"- **{item_sug['autor']}:** {item_sug['ideia']}")
